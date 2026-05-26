@@ -46,6 +46,7 @@ PHONE_CARRIER_RU = {
     "Tinkoff Mobile": ["999"],
 }
 
+
 def phone_lookup(number: str):
     try:
         num = phonenumbers.parse(number, "RU")
@@ -82,7 +83,6 @@ def phone_lookup(number: str):
 
     carr = carrier.name_for_number(num, "ru") or carrier.name_for_number(num, "en") or "Неизвестно"
 
-    # Код DEF (3 цифры после +7)
     def_code = e164[2:5] if e164.startswith("+7") else None
     carrier_ru = None
     if def_code:
@@ -108,6 +108,14 @@ def phone_lookup(number: str):
     }
 
 
+async def check_messenger(phone_e164: str) -> dict:
+    result = {}
+    result["telegram"] = f"https://t.me/{phone_e164.lstrip('+')}"
+    result["whatsapp"] = f"https://wa.me/{phone_e164.lstrip('+')}"
+    result["viber"] = f"https://viber.com/{phone_e164.lstrip('+')}"
+    return result
+
+
 async def email_lookup(email: str):
     email = email.strip().lower()
     if not EMAIL_REGEX.match(email):
@@ -120,7 +128,6 @@ async def email_lookup(email: str):
         "valid_format": True,
     }
 
-    # MX
     try:
         answers = dns.resolver.resolve(domain, "MX", lifetime=5)
         result["mx"] = [str(r.exchange) for r in answers]
@@ -130,7 +137,6 @@ async def email_lookup(email: str):
         result["mx"] = []
     result["mx_ok"] = len(result.get("mx", [])) > 0
 
-    # Gravatar
     h = hashlib.md5(email.encode()).hexdigest()
     try:
         async with httpx.AsyncClient(timeout=10) as c:
@@ -141,6 +147,19 @@ async def email_lookup(email: str):
                     "name": entry.get("displayName"),
                     "avatar": f"https://www.gravatar.com/avatar/{h}?s=200",
                     "urls": [u.get("value") for u in entry.get("urls", []) if u.get("value")],
+                }
+    except:
+        pass
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.get(f"https://emailrep.io/{email}", headers={"User-Agent": USER_AGENT})
+            if r.status_code == 200:
+                er = r.json()
+                result["emailrep"] = {
+                    "reputation": er.get("reputation", "unknown"),
+                    "suspicious": er.get("suspicious", False),
+                    "details": er.get("details", {}),
                 }
     except:
         pass

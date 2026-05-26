@@ -10,6 +10,7 @@ from handlers.admin import router as admin_router
 from handlers.callbacks import router as callbacks_router
 from handlers.osint_handlers import router as osint_router
 from handlers.text_handler import router as text_router
+from handlers.casino import router as casino_router, setup as casino_setup, init_db as casino_init_db
 
 COMMANDS = [
     BotCommand(command="start", description="Главное меню (OSINT + чат)"),
@@ -34,7 +35,8 @@ async def main():
 
     try:
         init_db()
-        logger.info("База данных инициализирована")
+        await casino_init_db()
+        logger.info("Базы данных инициализированы")
     except Exception as e:
         logger.error(f"Ошибка инициализации БД: {e}")
         return
@@ -45,6 +47,7 @@ async def main():
         logger.info(f"Прокси: {config.PROXY_URL}")
 
     bot = Bot(token=config.BOT_TOKEN, session=session)
+    casino_setup(bot)
     dp = Dispatcher()
 
     dp.include_routers(
@@ -52,6 +55,7 @@ async def main():
         admin_router,
         callbacks_router,
         osint_router,
+        casino_router,
         text_router,
     )
 

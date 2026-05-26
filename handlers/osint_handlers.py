@@ -3,7 +3,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message, CallbackQuery
 from utils.keyboards import main_kb, osint_menu_kb
 from db import log_osint_query
-from osint import phone_lookup, email_lookup, username_lookup, ip_lookup, domain_lookup
+from osint import phone_lookup, email_lookup, username_lookup, ip_lookup, domain_lookup, check_messenger
 
 router = Router()
 osint_waiting: dict[int, str] = {}
@@ -22,6 +22,15 @@ def _fmt_phone(data: dict) -> str:
         f"┣ Тип: {data['type']}",
         f"┣ Часовой пояс: {data['timezone']}",
     ]
+    mg = data.get("messengers")
+    if mg:
+        lines.append(f"\n📡 *Мессенджеры:*")
+        if mg.get("telegram"):
+            lines.append(f"┣ [Telegram]({mg['telegram']})")
+        if mg.get("whatsapp"):
+            lines.append(f"┣ [WhatsApp]({mg['whatsapp']})")
+        if mg.get("viber"):
+            lines.append(f"┣ [Viber]({mg['viber']})")
     return "\n".join(lines)
 
 
@@ -36,10 +45,16 @@ def _fmt_email(data: dict) -> str:
         lines.append("┣ MX-записи: ❌ не найдены")
     grav = data.get("gravatar")
     if grav:
-        lines.append(f"┣ Gravatar: {grav.get('name', 'есть')}")
+        name = grav.get("name", "есть") if grav.get("name") else "аккаунт есть"
+        lines.append(f"┣ Gravatar: {name}")
         if grav.get("urls"):
             for u in grav["urls"][:3]:
                 lines.append(f"┃ • {u}")
+    er = data.get("emailrep")
+    if er:
+        rep = er.get("reputation", "unknown")
+        susp = "⚠️ Подозрительный" if er.get("suspicious") else "✅ Нормальный"
+        lines.append(f"┣ Репутация: {rep} {susp}")
     return "\n".join(lines)
 
 
@@ -52,6 +67,12 @@ def _fmt_username(data: dict) -> str:
     ]
     for r in data["results"]:
         lines.append(f"┃ • [{r['platform']}]({r['url']})")
+    lines.append(
+        "\n⚠️ *Важно:* найти номер телефона, дату регистрации\n"
+        "или историю сообщений в группах по username\n"
+        "через Telegram Bot API — **невозможно**.\n"
+        "Эти данные не раскрываются публично."
+    )
     return "\n".join(lines)
 
 
@@ -104,6 +125,8 @@ async def _execute_lookup(message: Message, mode: str, query: str):
         if mode == "phone":
             result = phone_lookup(query)
             log_osint_query(uid, "phone", query)
+            if "error" not in result and result.get("e164"):
+                result["messengers"] = await check_messenger(result["e164"])
             formatted = _fmt_phone(result)
         elif mode == "email":
             result = await email_lookup(query)
@@ -165,6 +188,12 @@ async def cmd_help(message: Message):
         "🎲 *Анонимный чат*\n"
         "┣ `/start` → Начать чат — поиск собеседника\n"
         "┣ Кнопка «Завершить чат» — выход\n\n"
+        "🎰 *Казино*\n"
+        "┣ `/профиль` — профиль игрока\n"
+        "┣ `/игры` — список игр\n"
+        "┣ `/бонус` — ежедневный бонус\n"
+        "┣ `/топ` — топ игроков\n"
+        "┣ `/куб [ставка]` — игра в кости\n\n"
         "⚙️ *Прочее*\n"
         "┣ `/start` — главное меню\n"
         "┣ `/stats` — статистика (только админ)\n"
@@ -197,10 +226,6 @@ async def osint_callback(call: CallbackQuery):
         msg, mode = prompts[data]
         osint_waiting[uid] = mode
         await call.message.edit_text(msg, parse_mode="Markdown")
-        return
-
-    if data == "back_main":
-        await call.message.edit_text("👋 *Главное меню*", parse_mode="Markdown", reply_markup=main_kb())
         return
 
     await call.answer()

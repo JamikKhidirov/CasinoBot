@@ -28,9 +28,10 @@ async def cmd_start(message: Message):
     if uid in waiting_users:
         await message.answer("🔍 Вы в поиске собеседника.")
         return
+    show_chat = message.chat.type == "private"
     await message.answer(
-        "👋 Добро пожаловать!\n🔍 OSINT-пробив — поиск информации\n🎲 Анонимный чат — общение",
-        reply_markup=main_kb()
+        "👋 Добро пожаловать!\n🔍 OSINT-пробив — поиск информации" + ("\n🎲 Анонимный чат — общение" if show_chat else ""),
+        reply_markup=main_kb(show_chat=show_chat)
     )
 
 

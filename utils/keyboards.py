@@ -1,14 +1,19 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
-def main_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔍 OSINT-пробив", callback_data="osint_menu")],
-        [InlineKeyboardButton(text="🎲 Анонимный чат", callback_data="start_chat")],
-        [InlineKeyboardButton(text="👤 Профиль", callback_data="myprofile"),
-         InlineKeyboardButton(text="📊 Статистика", callback_data="mystats")],
-        [InlineKeyboardButton(text="❓ Помощь", callback_data="help")]
-    ])
+def main_kb(show_chat: bool = True):
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔍 OSINT-пробив", callback_data="osint_menu"))
+    if show_chat:
+        builder.row(InlineKeyboardButton(text="🎲 Анонимный чат", callback_data="start_chat"))
+    builder.row(InlineKeyboardButton(text="🎰 Казино", callback_data="casino_menu"))
+    builder.row(
+        InlineKeyboardButton(text="👤 Профиль", callback_data="myprofile"),
+        InlineKeyboardButton(text="📊 Статистика", callback_data="mystats"),
+    )
+    builder.row(InlineKeyboardButton(text="❓ Помощь", callback_data="help"))
+    return builder.as_markup()
 
 
 def osint_menu_kb():
@@ -26,4 +31,10 @@ def chat_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="❌ Завершить чат", callback_data="leave_chat"),
          InlineKeyboardButton(text="⚠️ Пожаловаться", callback_data="report_chat")]
+    ])
+
+
+def search_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отменить поиск", callback_data="cancel_search")]
     ])

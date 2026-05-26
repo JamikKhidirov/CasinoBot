@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 import uuid
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -17,13 +16,9 @@ from aiogram.types import (
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from dotenv import load_dotenv
-
-load_dotenv()
 
 BOT_TOKEN = "7042929053:AAEsz4mIBA6P2ZKoPRiMuad1UIdR8dS9TQE"
-ADMIN_ID =1819756249
-PROXY_URL = os.getenv("PROXY_URL", None)
+ADMIN_ID = 1819756249
 COMMISSION_RATE = Decimal("0.1")
 DB_NAME = "casino.db"
 INITIAL_BALANCE = 1000
@@ -34,10 +29,7 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
-if PROXY_URL:
-    bot = Bot(token=BOT_TOKEN, proxy=PROXY_URL)
-else:
-    bot = Bot(token=BOT_TOKEN)
+bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 router = Router()
 dp.include_router(router)

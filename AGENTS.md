@@ -2,7 +2,7 @@
 
 ## Проект
 
-Telegram-бот с двумя режимами: **OSINT-пробив** (телефон, email, username, IP, домен) и **анонимный чат** (поиск собеседника, переписка, жалобы, баны, апелляции).
+Telegram-бот с режимами: **OSINT-пробив** (телефон, email, username, IP, домен), **анонимный чат** (поиск собеседника, переписка, жалобы, баны, апелляции) и **Казино** (кости, боулинг, дротики, баскетбол, футбол, ставки, баланс).
 
 ## Запуск
 
@@ -23,12 +23,14 @@ python main.py
 | `handlers/osint_handlers.py` | Обработчики OSINT-команд (меню + ввод) |
 | `handlers/text_handler.py` | Диспетчер текстовых сообщений (OSINT vs чат) |
 | `handlers/user.py` | Хендлер `/start`, состояние `active_users`/`waiting_users` для чата |
-| `handlers/callbacks.py` | Callback'и чата: старт/выход |
+| `handlers/casino.py` | Casino-хендлеры: профиль, игры, ставки, бонусы |
+| `handlers/callbacks.py` | Callback'и чата + казино + общие (back/help) |
 | `handlers/admin.py` | Админ-команды: `/stats` |
-| `utils/keyboards.py` | Inline-клавиатуры (главное меню, OSINT, чат) |
+| `utils/keyboards.py` | Inline-клавиатуры (главное меню, OSINT, чат, казино) |
 | `utils/helpers.py` | Хелперы: `is_admin`, `is_banned`, `save_message` |
-| `requirements.txt` | `aiogram>=3.12`, `phonenumbers`, `httpx`, `dnspython` |
-| `casino/` | Отдельный проект — CasinoBot (aiogram 3.x, FSM, игры) |
+| `requirements.txt` | `aiogram>=3.12`, `phonenumbers`, `httpx`, `dnspython`, `aiosqlite` |
+| `casino/casino.py` | Отдельный проект — CasinoBot (standalone fallback) |
+| `casino.db` | БД казино (отдельный SQLite, aiosqlite) |
 
 ## Важные замечания
 
@@ -45,7 +47,7 @@ python main.py
 
 ## Команды бота (Telegram)
 
-- `/start` — главное меню (OSINT + чат)
+- `/start` — главное меню (OSINT + чат + казино)
 - `/phone <номер>` — пробив телефона (или через меню)
 - `/email <email>` — пробив email
 - `/user <username>` — поиск username в соцсетях
@@ -53,6 +55,11 @@ python main.py
 - `/domain <домен>` — информация о домене
 - `/help` — справка по всем командам
 - `/stats` — статистика (только для админов)
+- `/профиль` — профиль игрока в казино
+- `/игры` — список игр казино
+- `/бонус` — ежедневный бонус
+- `/топ` — топ игроков
+- `/куб [ставка]` / `/боулинг [ставка]` / `/дротики [ставка]` / `/баскетбол [ставка]` / `/футбол [ставка]` — игры
 
 Все OSINT-команды работают в двух режимах:
 1. **Быстрый**: `/phone +79123456789` — результат сразу
