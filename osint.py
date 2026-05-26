@@ -13,28 +13,46 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 EMAIL_REGEX = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 SOCIAL_PLATFORMS = {
-    "VK": ("https://vk.com/{}", lambda r: r.status_code == 200 and "id=\"profile" in r.text),
+    "VK": ("https://vk.com/{}", lambda r: r.status_code == 200 and 'id="profile' in r.text),
     "Telegram": ("https://t.me/{}", lambda r: r.status_code == 200 and "tgme_page_title" in r.text),
-    "GitHub": ("https://github.com/{}", lambda r: r.status_code == 200),
-    "Instagram": ("https://www.instagram.com/{}/", lambda r: r.status_code == 200),
-    "Twitter / X": ("https://twitter.com/{}", lambda r: r.status_code == 200),
-    "Reddit": ("https://www.reddit.com/user/{}", lambda r: r.status_code == 200 and "page-not-found" not in r.text),
-    "YouTube": ("https://www.youtube.com/@{}", lambda r: r.status_code == 200),
-    "TikTok": ("https://www.tiktok.com/@{}", lambda r: r.status_code == 200),
-    "Pinterest": ("https://www.pinterest.com/{}/", lambda r: r.status_code == 200),
-    "Twitch": ("https://www.twitch.tv/{}", lambda r: r.status_code == 200),
-    "Steam": ("https://steamcommunity.com/id/{}", lambda r: r.status_code == 200),
-    "OK": ("https://ok.ru/{}", lambda r: r.status_code == 200),
-    "Pikabu": ("https://pikabu.ru/@{}", lambda r: r.status_code == 200),
-    "SoundCloud": ("https://soundcloud.com/{}", lambda r: r.status_code == 200),
-    "Medium": ("https://medium.com/@{}", lambda r: r.status_code == 200),
-    "Habr": ("https://habr.com/users/{}/", lambda r: r.status_code == 200),
-    "Replit": ("https://replit.com/@{}", lambda r: r.status_code == 200),
-    "Codeforces": ("https://codeforces.com/profile/{}", lambda r: r.status_code == 200),
-    "Chess.com": ("https://www.chess.com/member/{}", lambda r: r.status_code == 200),
-    "DEV.to": ("https://dev.to/{}", lambda r: r.status_code == 200),
-    "Boosty": ("https://boosty.to/{}", lambda r: r.status_code == 200),
-    "Product Hunt": ("https://www.producthunt.com/@{}", lambda r: r.status_code == 200),
+    "GitHub": ("https://github.com/{}", lambda r: r.status_code == 200 and "Page not found" not in r.text),
+    "Instagram": ("https://www.instagram.com/{}/", lambda r: r.status_code == 200 and "page isn't available" not in r.text.lower() and "Страница недоступна" not in r.text),
+    "Twitter / X": ("https://x.com/{}", lambda r: r.status_code == 200 and "This account doesn't exist" not in r.text and "/i/flow/login" not in r.text[:2000] and "profile" in r.text.lower()),
+    "Reddit": ("https://www.reddit.com/user/{}/", lambda r: r.status_code == 200 and "page-not-found" not in r.text and "nobody" not in r.text.lower()[:5000]),
+    "YouTube": ("https://www.youtube.com/@{}", lambda r: r.status_code == 200 and "Not Found" not in r.text and "This page doesn't exist" not in r.text and "channel" in r.text.lower()),
+    "TikTok": ("https://www.tiktok.com/@{}", lambda r: r.status_code == 200 and "Couldn't find this account" not in r.text),
+    "Pinterest": ("https://www.pinterest.com/{}/", lambda r: r.status_code == 200 and "Page not found" not in r.text),
+    "Twitch": ("https://www.twitch.tv/{}", lambda r: r.status_code == 200 and "Page Not Found" not in r.text and "Sorry" not in r.text[:5000]),
+    "Steam": ("https://steamcommunity.com/id/{}", lambda r: r.status_code == 200 and "The specified profile could not be found" not in r.text),
+    "OK": ("https://ok.ru/{}", lambda r: r.status_code == 200 and "Пользователь не найден" not in r.text),
+    "Pikabu": ("https://pikabu.ru/@{}", lambda r: r.status_code == 200 and "Страница не найдена" not in r.text),
+    "SoundCloud": ("https://soundcloud.com/{}", lambda r: r.status_code == 200 and "Page not found" not in r.text),
+    "Medium": ("https://medium.com/@{}", lambda r: r.status_code == 200 and "Page not found" not in r.text),
+    "Habr": ("https://habr.com/ru/users/{}/", lambda r: r.status_code == 200 and "Страница не найдена" not in r.text and "Пользователь не найден" not in r.text),
+    "Replit": ("https://replit.com/@{}", lambda r: r.status_code == 200 and "Page not found" not in r.text and "404" not in r.text[:2000]),
+    "Codeforces": ("https://codeforces.com/profile/{}", lambda r: r.status_code == 200 and "is not found" not in r.text),
+    "Chess.com": ("https://www.chess.com/member/{}", lambda r: r.status_code == 200 and "Page not found" not in r.text),
+    "DEV.to": ("https://dev.to/{}", lambda r: r.status_code == 200 and "Page not found" not in r.text),
+    "Boosty": ("https://boosty.to/{}", lambda r: r.status_code not in (404, 410) and "Страница не найдена" not in r.text),
+    "Product Hunt": ("https://www.producthunt.com/@{}", lambda r: r.status_code == 200 and "Page not found" not in r.text),
+    "Facebook": ("https://www.facebook.com/{}", lambda r: r.status_code == 200 and "This content isn't available" not in r.text and "Sorry, this page isn't available" not in r.text and "login" not in r.url),
+    "LinkedIn": ("https://www.linkedin.com/in/{}", lambda r: r.status_code == 200 and "Page not found" not in r.text and "profile" in r.text.lower()),
+    "Snapchat": ("https://www.snapchat.com/add/{}", lambda r: r.status_code == 200 and "not found" not in r.text.lower()),
+    "GitLab": ("https://gitlab.com/{}", lambda r: r.status_code == 200 and "Page not found" not in r.text and "404" not in r.text[:2000]),
+    "Bitbucket": ("https://bitbucket.org/{}/", lambda r: r.status_code == 200 and "Page not found" not in r.text),
+    "Behance": ("https://www.behance.net/{}", lambda r: r.status_code == 200 and "Page not found" not in r.text),
+    "Dribbble": ("https://dribbble.com/{}", lambda r: r.status_code == 200 and "Page not found" not in r.text),
+    "Flickr": ("https://www.flickr.com/people/{}", lambda r: r.status_code == 200 and "Page not found" not in r.text),
+    "Spotify": ("https://open.spotify.com/user/{}", lambda r: r.status_code == 200 and "Page not found" not in r.text),
+    "VSCO": ("https://vsco.co/{}", lambda r: r.status_code == 200 and "Page not found" not in r.text),
+    "Imgur": ("https://imgur.com/user/{}", lambda r: r.status_code == 200 and "Page not found" not in r.text and "not found" not in r.text.lower()[:3000]),
+    "Rutube": ("https://rutube.ru/u/{}/", lambda r: r.status_code == 200 and "Страница не найдена" not in r.text and "404" not in r.text[:2000]),
+    "Last.fm": ("https://www.last.fm/user/{}", lambda r: r.status_code == 200 and "User not found" not in r.text),
+    "Teletype": ("https://teletype.in/@{}", lambda r: r.status_code == 200 and "not found" not in r.text.lower()[:2000]),
+    "Patreon": ("https://www.patreon.com/{}", lambda r: r.status_code == 200 and "Page not found" not in r.text),
+    "Telegram DB": ("https://tgdb.ru/user/{}", lambda r: r.status_code == 200 and "не найден" not in r.text),
+    "Tgstat": ("https://tgstat.ru/user/{}", lambda r: r.status_code == 200 and "не найден" not in r.text),
+    "LeakCheck": ("https://leakcheck.io/search?check={}&type=username", lambda r: r.status_code == 200),
 }
 
 PHONE_CARRIER_RU = {
@@ -93,6 +111,13 @@ def phone_lookup(number: str):
 
     region = geocoder.description_for_valid_number(num, "ru") or "Неизвестно"
 
+    # Additional checks: name from public databases
+    extra_services = []
+    for op, codes in PHONE_CARRIER_RU.items():
+        if def_code and def_code in codes:
+            extra_services.append(f"Оператор {op}")
+            break
+
     return {
         "valid": True,
         "international": intern,
@@ -105,6 +130,8 @@ def phone_lookup(number: str):
         "type": type_map.get(num_type, "Неизвестно"),
         "timezone": ", ".join(tz) if tz else "Неизвестно",
         "country_code": f"+{num.country_code}",
+        "carrier_def": def_code,
+        "services": extra_services,
     }
 
 
@@ -167,6 +194,29 @@ async def email_lookup(email: str):
     return result
 
 
+MESSENGER_PLATFORMS = {
+    "WhatsApp": ("https://wa.me/{}", lambda r: r.status_code == 200 and "WhatsApp" in r.text),
+    "Viber": ("https://viber.com/{}", lambda r: r.status_code == 200 or "viber" in r.text.lower()),
+    "Telegram": ("tg://resolve?domain={}", lambda r: False),
+}
+
+
+async def phone_messenger_check(phone_e164: str) -> list:
+    phone_clean = phone_e164.lstrip("+")
+    results = []
+    async with httpx.AsyncClient(timeout=httpx.Timeout(8.0)) as c:
+        tasks = []
+        for platform, (url, check) in MESSENGER_PLATFORMS.items():
+            if platform == "Telegram":
+                continue
+            tasks.append(_check_platform(c, platform, url.format(phone_clean), check))
+        messenger_results = await asyncio.gather(*tasks)
+        for r in messenger_results:
+            if r["found"]:
+                results.append(r)
+    return results
+
+
 async def username_lookup(username: str):
     username = username.strip()
     async with httpx.AsyncClient(timeout=httpx.Timeout(8.0)) as c:
@@ -190,6 +240,49 @@ async def _check_platform(client, platform, url, check_fn):
         return {"platform": platform, "url": url, "found": check_fn(r)}
     except:
         return {"platform": platform, "url": url, "found": False}
+
+
+async def telegram_profile(username: str) -> dict:
+    """Extract Telegram profile info from t.me page."""
+    username = username.strip().lstrip("@")
+    url = f"https://t.me/{username}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as c:
+            r = await c.get(url, headers={"User-Agent": USER_AGENT})
+            if r.status_code != 200:
+                return {"found": False, "username": username}
+            text = r.text
+            import re
+            name = ""
+            m = re.search(r'<div class="tgme_page_title">(.+?)</div>', text, re.DOTALL)
+            if m:
+                name = m.group(1).strip()
+                name = re.sub(r'<[^>]+>', '', name)
+            bio = ""
+            m = re.search(r'<div class="tgme_page_description">(.+?)</div>', text, re.DOTALL)
+            if m:
+                bio = m.group(1).strip()
+                bio = re.sub(r'<[^>]+>', '', bio)
+                bio = bio.replace('<br/>', '\n').replace('<br>', '\n')
+            extra = ""
+            m = re.search(r'<div class="tgme_page_extra">(.+?)</div>', text, re.DOTALL)
+            if m:
+                extra = m.group(1).strip()
+                extra = re.sub(r'<[^>]+>', '', extra)
+            has_photo = "tgme_page_photo_image" in text
+            is_channel = "tgme_channel_info" in text
+            return {
+                "found": True,
+                "username": username,
+                "name": name,
+                "bio": bio[:300] if bio else "",
+                "extra": extra[:200] if extra else "",
+                "url": url,
+                "has_photo": has_photo,
+                "type": "channel" if is_channel else "user",
+            }
+    except Exception as e:
+        return {"found": False, "username": username, "error": str(e)}
 
 
 async def ip_lookup(ip: str):
@@ -239,21 +332,52 @@ async def domain_lookup(domain: str):
         except:
             pass
 
-    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
-        try:
-            r = await c.get(f"https://{domain}", headers={"User-Agent": USER_AGENT})
-            result["http_status"] = r.status_code
-            result["server"] = r.headers.get("Server", "N/A")
-            result["ssl"] = True
-        except httpx.SSLError:
-            result["ssl"] = False
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
             try:
-                r = await c.get(f"http://{domain}", headers={"User-Agent": USER_AGENT})
+                r = await c.get(f"https://{domain}", headers={"User-Agent": USER_AGENT})
                 result["http_status"] = r.status_code
                 result["server"] = r.headers.get("Server", "N/A")
-            except:
-                result["http_error"] = "Таймаут"
+                result["ssl"] = True
+            except httpx.SSLError:
+                result["ssl"] = False
+                try:
+                    r = await c.get(f"http://{domain}", headers={"User-Agent": USER_AGENT})
+                    result["http_status"] = r.status_code
+                    result["server"] = r.headers.get("Server", "N/A")
+                except:
+                    result["http_error"] = "Таймаут"
+    except:
+        result["http_error"] = "Таймаут"
+
+    # Additional checks
+    try:
+        txt_records = result.get("TXT", [])
+        for t in txt_records:
+            t_lower = t.lower()
+            if "spf" in t_lower:
+                result["spf"] = t
+            if "dkim" in t_lower or "v=dkim" in t_lower:
+                result["dkim"] = t
+            if "dmarc" in t_lower or "v=dmarc" in t_lower:
+                result["dmarc"] = t
+    except:
+        pass
+
+    # Try to get server IP geolocation
+    if result.get("A"):
+        try:
+            ip_from_domain = result["A"][0]
+            async with httpx.AsyncClient(timeout=8) as c:
+                r = await c.get(f"http://ip-api.com/json/{ip_from_domain}?fields=country,regionName,city,isp,org",
+                                headers={"User-Agent": USER_AGENT})
+                if r.status_code == 200:
+                    geo = r.json()
+                    if geo.get("status") != "fail":
+                        result["hosting_country"] = geo.get("country", "")
+                        result["hosting_isp"] = geo.get("isp", "")
+                        result["hosting_org"] = geo.get("org", "")
         except:
-            result["http_error"] = "Таймаут"
+            pass
 
     return result

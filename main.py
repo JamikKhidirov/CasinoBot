@@ -12,16 +12,41 @@ from handlers.callbacks import router as callbacks_router
 from handlers.osint_handlers import router as osint_router
 from handlers.text_handler import router as text_router
 from handlers.casino import router as casino_router, setup as casino_setup, init_db as casino_init_db
+from handlers.moderation import router as mod_router
 
 COMMANDS = [
-    BotCommand(command="start", description="Главное меню (OSINT + чат)"),
+    BotCommand(command="start", description="Главное меню (OSINT + чат + казино)"),
     BotCommand(command="phone", description="Пробив по номеру телефона"),
     BotCommand(command="email", description="Пробив по email"),
     BotCommand(command="user", description="Поиск username в соцсетях"),
     BotCommand(command="ip", description="Геолокация по IP-адресу"),
     BotCommand(command="domain", description="Информация о домене"),
     BotCommand(command="help", description="Справка по командам"),
-    BotCommand(command="stats", description="Статистика (админ)"),
+    # Казино
+    BotCommand(command="profile", description="🎰 Профиль игрока"),
+    BotCommand(command="bonus", description="🎁 Ежедневный бонус"),
+    BotCommand(command="top", description="🏆 Топ игроков"),
+    BotCommand(command="games", description="🎮 Список игр"),
+    BotCommand(command="dice", description="🎲 Игра в кости [ставка]"),
+    BotCommand(command="bowling", description="🎳 Боулинг [ставка]"),
+    BotCommand(command="darts", description="🎯 Дротики [ставка]"),
+    BotCommand(command="basket", description="🏀 Баскетбол [ставка]"),
+    BotCommand(command="football", description="⚽ Футбол [ставка]"),
+    BotCommand(command="active", description="🕹 Активные игры"),
+    BotCommand(command="unlock", description="🔓 Отменить свои игры"),
+    # Админ-команды
+    BotCommand(command="stats", description="📊 Статистика бота"),
+    BotCommand(command="admin", description="👑 Админ-панель казино"),
+    BotCommand(command="players", description="👥 Список игроков казино"),
+    BotCommand(command="mod", description="🛡 Панель модерации"),
+    BotCommand(command="ban", description="🚫 Забанить пользователя"),
+    BotCommand(command="unban", description="✅ Разбанить пользователя"),
+    BotCommand(command="mute", description="🔇 Замутить пользователя"),
+    BotCommand(command="unmute", description="🔊 Размутить пользователя"),
+    BotCommand(command="warn", description="⚠️ Выдать варн"),
+    BotCommand(command="check", description="📋 Проверить пользователя"),
+    BotCommand(command="chatlog", description="💬 Показать переписку"),
+    BotCommand(command="warns", description="⚠️ Варны пользователя"),
 ]
 
 
@@ -54,6 +79,7 @@ async def main():
         callbacks_router,
         osint_router,
         casino_router,
+        mod_router,
         text_router,
     )
 

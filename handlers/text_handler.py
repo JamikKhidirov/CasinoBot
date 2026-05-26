@@ -3,6 +3,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 from handlers.osint_handlers import osint_waiting, osint_text_handler
 from handlers.user import active_users, handle_chat_text
+from utils.helpers import is_banned, is_muted
 
 router = Router()
 
@@ -26,6 +27,12 @@ async def text_dispatcher(message: Message, state: FSMContext):
         return
 
     if uid in active_users:
+        if is_banned(uid):
+            await message.answer("🚫 Вы забанены и не можете отправлять сообщения.")
+            return
+        if is_muted(uid):
+            await message.answer("🔇 Вы замучены. Подождите окончания наказания.")
+            return
         await handle_chat_text(message)
         return
 

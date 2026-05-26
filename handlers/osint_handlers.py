@@ -2,9 +2,9 @@ from aiogram import Router, F
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message, CallbackQuery
 from utils.keyboards import main_kb, osint_menu_kb
-from utils.helpers import is_admin
+from config import OWNER_ID
 from db import log_osint_query
-from osint import phone_lookup, email_lookup, username_lookup, ip_lookup, domain_lookup
+from osint import phone_lookup, email_lookup, username_lookup, ip_lookup, domain_lookup, phone_messenger_check, telegram_profile
 from leak import leak_search
 
 router = Router()
@@ -15,137 +15,157 @@ def _fmt_phone(data: dict) -> str:
     if "error" in data:
         return f"❌ {data['error']}"
     lines = [
-        f"📱 *Результат по номеру:*",
-        f"┣ Номер: `{data['international']}`",
-        f"┣ Нац. формат: `{data['national']}`",
-        f"┣ Страна: {data['country']} ({data['country_code']})",
-        f"┣ Регион: {data['region']}",
-        f"┣ Оператор: {data['carrier_ru']}",
-        f"┣ Тип: {data['type']}",
-        f"┣ Часовой пояс: {data['timezone']}",
-        f"\n📡 *Мессенджеры (открыть в приложении, чтобы проверить):*",
-        f"┣ [Telegram](tg://resolve?domain={data['e164'].lstrip('+')})",
-        f"┣ [WhatsApp](https://wa.me/{data['e164'].lstrip('+')})",
-        f"┣ [Viber](viber://chat?number={data['e164'].lstrip('+')})",
+        f"<b>📱 Результат по номеру</b>\n",
+        f"┃ Номер: <code>{data['international']}</code>",
+        f"┃ Нац. формат: <code>{data['national']}</code>",
+        f"┃ Страна: {data['country']} ({data['country_code']})",
+        f"┃ Регион: {data['region']}",
+        f"┃ Оператор: {data['carrier_ru']}",
+        f"┃ Тип: {data['type']}",
+        f"┃ Часовой пояс: {data['timezone']}",
     ]
+    if data.get("services"):
+        lines.append(f"┃ Сервисы: {', '.join(data['services'])}")
+    messengers = data.get("messengers")
+    if messengers:
+        lines.append("")
+        lines.append("<b>📡 Мессенджеры:</b>")
+        for m in messengers:
+            lines.append(f"┃ {m}")
     leak = data.get("leak")
     if leak and leak.get("found"):
-        lines.append(f"\n🔓 *Утечки данных:*")
+        lines.append("")
+        lines.append("<b>🔓 Утечки данных:</b>")
         for src in leak.get("details", []):
-            lines.append(f"┣ {src['source']}: найдено {src.get('count', '?')} записей")
+            lines.append(f"┃ {src['source']}: найдено {src.get('count', '?')} записей")
             if src.get("sample"):
                 for s in src["sample"][:3]:
                     clean = str(s)[:80]
-                    lines.append(f"┃ `{clean}`")
+                    lines.append(f"┃ <code>{clean}</code>")
     return "\n".join(lines)
 
 
 def _fmt_email(data: dict) -> str:
     if "error" in data:
         return f"❌ {data['error']}"
-    lines = [f"📧 *Результат по email:*", f"┣ Email: `{data['email']}`", f"┣ Домен: `{data['domain']}`"]
-    mx = data.get("mx", [])
-    if mx:
-        lines.append(f"┣ MX-записи ({len(mx)}): " + ", ".join(f"`{m}`" for m in mx[:5]))
-    else:
-        lines.append(f"┣ MX-записи: ❌ не найдены")
-    grav = data.get("gravatar")
-    if grav:
-        name = grav.get("name", "аккаунт есть")
-        lines.append(f"┣ Gravatar: {name}")
-        if grav.get("urls"):
-            for u in grav["urls"][:3]:
-                lines.append(f"┃ • {u}")
-    er = data.get("emailrep")
-    if er:
+    lines = [
+        f"<b>📧 Результат по email:</b>",
+        f"┃ Email: <code>{data['email']}</code>",
+        f"┃ Домен: <code>{data['domain']}</code>",
+        f"┃ MX-записи: {'✅ Есть' if data.get('mx_ok') else '❌ Нет'}",
+    ]
+    if data.get("mx"):
+        for mx in data["mx"][:3]:
+            lines.append(f"┃ └ <code>{mx}</code>")
+    if data.get("gravatar"):
+        g = data["gravatar"]
+        lines.append(f"┃ Gravatar: <b>{g.get('name', '—')}</b>")
+        if g.get("urls"):
+            for u in g["urls"][:3]:
+                lines.append(f"┃ └ <code>{u}</code>")
+    if data.get("emailrep"):
+        er = data["emailrep"]
         rep = er.get("reputation", "unknown")
-        susp = er.get("suspicious", False)
-        lines.append(f"┣ Репутация: {rep} {'⚠️' if susp else '✅'}")
-    leak = data.get("leak")
-    if leak and leak.get("found"):
-        lines.append(f"\n🔓 *Утечки данных:*")
-        for src in leak.get("details", []):
-            breaches = src.get("breaches", [])
-            if breaches:
-                lines.append(f"┣ {src['source']}:")
-                for b in breaches[:5]:
-                    lines.append(f"┃ 🔴 {b}")
-            else:
-                lines.append(f"┣ {src['source']}: данные найдены")
-            if src.get("sample"):
-                for s in src["sample"][:3]:
-                    lines.append(f"┃ `{str(s)[:80]}`")
+        rep_emoji = "🟢" if rep == "high" else "🟡" if rep == "medium" else "🔴"
+        lines.append(f"┃ Репутация: {rep_emoji} {rep}")
+        if er.get("suspicious"):
+            lines.append(f"┃ ⚠️ Подозрительный")
     return "\n".join(lines)
 
 
 def _fmt_username(data: dict) -> str:
     lines = [
-        f"🔎 *Результат по username:*",
-        f"┣ Username: `{data['username']}`",
-        f"┣ Проверено: {data['checked']} площадок",
-        f"┣ Найдено: {data['found']} совпадений",
+        f"<b>🔎 Результат по username:</b>",
+        f"┃ Username: <code>{data['username']}</code>",
+        f"┃ Проверено: {data['checked']} площадок",
+        f"┃ Найдено: {data['found']} совпадений",
     ]
+    tg = data.get("telegram")
+    if tg and tg.get("found"):
+        lines.append("")
+        lines.append("<b>📡 Telegram профиль:</b>")
+        lines.append(f"┃ 👤 Имя: <b>{tg.get('name', '—')}</b>")
+        if tg.get("bio"):
+            lines.append(f"┃ 📝 О себе: {tg['bio'][:200]}")
+        if tg.get("extra"):
+            lines.append(f"┃ ℹ️ {tg['extra']}")
+        lines.append(f"┃ 🔗 <code>{tg['url']}</code>")
+        lines.append(f"┃ 🖼 Фото: {'✅ Есть' if tg.get('has_photo') else '❌ Нет'}")
+        lines.append(f"┃ 📋 Тип: {tg['type']}")
     if data['results']:
-        lines.append("┃")
+        lines.append("")
+        lines.append("<b>🌐 Найден на площадках:</b>")
         for r in data["results"]:
-            lines.append(f"┃ ✅ [{r['platform']}]({r['url']})")
+            lines.append(f"┃ ✅ <b>{r['platform']}</b>\n┃ └ <code>{r['url']}</code>")
     else:
-        lines.append("┃ ❌ Не найдено")
-    lines.append(
-        "\n⚠️ *Ограничения:* определяются только публичные\n"
-        "профили в соцсетях. Получить историю сообщений\n"
-        "из групп или дату регистрации через бота —\n"
-        "**технически невозможно** (Telegram Bot API\n"
-        "не даёт доступ к сообщениям других пользователей)."
-    )
+        lines.append("┃")
+        lines.append("┃ ❌ Не найдено ни одного профиля")
+    return "\n".join(lines)
     return "\n".join(lines)
 
 
 def _fmt_ip(data: dict) -> str:
     if "error" in data:
         return f"❌ {data['error']}"
-    parts = [f"🌐 *IP:* `{data['ip']}`"]
-    if data.get("country"): parts.append(f"┣ Страна: {data['country']}")
-    if data.get("region"): parts.append(f"┣ Регион: {data['region']}")
-    if data.get("city"): parts.append(f"┣ Город: {data['city']}")
-    if data.get("zip"): parts.append(f"┣ Индекс: {data['zip']}")
-    if data.get("lat") and data.get("lon"):
-        parts.append(f"┣ Координаты: `{data['lat']}, {data['lon']}`")
-    if data.get("isp"): parts.append(f"┣ Провайдер: {data['isp']}")
-    if data.get("org"): parts.append(f"┣ Организация: {data['org']}")
-    if data.get("asn"): parts.append(f"┣ ASN: {data['asn']}")
-    if data.get("timezone"): parts.append(f"┣ Часовой пояс: {data['timezone']}")
+    parts = [
+        f"<b>🌐 Результат по IP:</b>",
+        f"┃ IP: <code>{data['ip']}</code>",
+        f"┃ Страна: {data.get('country', '—')}",
+        f"┃ Регион: {data.get('region', '—')}",
+        f"┃ Город: {data.get('city', '—')}",
+        f"┃ Индекс: {data.get('zip', '—')}",
+        f"┃ Координаты: {data.get('lat', '—')}, {data.get('lon', '—')}",
+        f"┃ Провайдер: {data.get('isp', '—')}",
+        f"┃ Организация: {data.get('org', '—')}",
+        f"┃ ASN: {data.get('asn', '—')}",
+        f"┃ Часовой пояс: {data.get('timezone', '—')}",
+    ]
     flags = []
     if data.get("mobile"): flags.append("📱 Мобильный")
     if data.get("proxy"): flags.append("🔒 Прокси/VPN")
-    if data.get("hosting"): flags.append("☁ Хостинг")
-    if flags: parts.append(f"┣ {' | '.join(flags)}")
+    if data.get("hosting"): flags.append("☁️ Хостинг")
+    if flags:
+        parts.append(f"┃ Флаги: {', '.join(flags)}")
     return "\n".join(parts)
 
 
 def _fmt_domain(data: dict) -> str:
     if "error" in data:
         return f"❌ {data['error']}"
-    parts = [f"🏛 *Домен:* `{data['domain']}`"]
-    for rtype in ("A", "AAAA", "NS"):
-        if data.get(rtype):
-            vals = data[rtype][:5]
-            parts.append(f"┣ {rtype}: " + ", ".join(f"`{v}`" for v in vals))
-    if data.get("MX"):
-        vals = data["MX"][:5]
-        parts.append(f"┣ MX: " + ", ".join(f"`{v}`" for v in vals))
-    if "http_status" in data:
-        ico = "✅" if data["http_status"] == 200 else "⚠️"
-        parts.append(f"┣ HTTP: {ico} {data['http_status']}")
-    if data.get("server"): parts.append(f"┣ Сервер: {data['server']}")
-    if "ssl" in data: parts.append(f"┣ SSL: {'✅ Есть' if data['ssl'] else '❌ Нет'}")
+    parts = [
+        f"<b>🏛 Результат по домену:</b>",
+        f"┃ Домен: <code>{data['domain']}</code>",
+    ]
+    for rtype in ["A", "AAAA", "MX", "NS", "TXT", "SOA"]:
+        vals = data.get(rtype)
+        if vals:
+            lines = [f"┃ {rtype} ({len(vals)}):"]
+            for v in vals[:6]:
+                lines.append(f"┃ └ <code>{v}</code>")
+            if len(vals) > 6:
+                lines.append(f"┃ └ ...и ещё {len(vals) - 6}")
+            parts.append("\n".join(lines))
+    if data.get("http_status"):
+        parts.append(f"┃ HTTP: <b>{data['http_status']}</b>")
+    if data.get("server"):
+        parts.append(f"┃ Сервер: {data['server']}")
+    if "ssl" in data:
+        parts.append(f"┃ SSL: {'✅ Есть' if data['ssl'] else '❌ Нет'}")
+    if data.get("spf"):
+        parts.append(f"┃ SPF: ✅")
+    if data.get("dkim"):
+        parts.append(f"┃ DKIM: ✅")
+    if data.get("dmarc"):
+        parts.append(f"┃ DMARC: ✅")
+    if data.get("hosting_country"):
+        parts.append(f"┃ 🌍 Хостинг: {data.get('hosting_country', '')}, {data.get('hosting_isp', '')}")
     return "\n".join(parts)
 
 
 async def _execute_lookup(message: Message, mode: str, query: str):
     """Выполняет OSINT-поиск и отправляет результат."""
     uid = message.from_user.id
-    if not is_admin(uid):
+    if uid != OWNER_ID:
         await message.answer("❌ OSINT доступен только администраторам.")
         return
 
@@ -156,6 +176,9 @@ async def _execute_lookup(message: Message, mode: str, query: str):
             log_osint_query(uid, "phone", query)
             if "error" not in result and result.get("e164"):
                 result["leak"] = await leak_search(result["e164"], "phone")
+                messengers = await phone_messenger_check(result["e164"])
+                if messengers:
+                    result["messengers"] = [f"{m['platform']} — <code>{m['url']}</code>" for m in messengers]
             formatted = _fmt_phone(result)
         elif mode == "email":
             result = await email_lookup(query)
@@ -166,6 +189,9 @@ async def _execute_lookup(message: Message, mode: str, query: str):
         elif mode == "username":
             result = await username_lookup(query)
             log_osint_query(uid, "username", query)
+            tg = await telegram_profile(query)
+            if tg.get("found"):
+                result["telegram"] = tg
             formatted = _fmt_username(result)
         elif mode == "ip":
             result = await ip_lookup(query)
@@ -191,14 +217,14 @@ def _cmd_shortcut(mode: str, prompt: str, example: str):
     """Создаёт обработчик для /команда [аргументы]."""
     async def handler(message: Message, command: CommandObject):
         uid = message.from_user.id
-        if not is_admin(uid):
+        if uid != OWNER_ID:
             await message.answer("❌ OSINT доступен только администраторам.")
             return
         if command.args:
             await _execute_lookup(message, mode, command.args)
         else:
             osint_waiting[uid] = (mode, message.chat.id, message.message_id)
-            await message.answer(f"{prompt}\nПример: `{example}`", parse_mode="Markdown")
+            await message.answer(f"{prompt}\nПример: <code>{example}</code>", parse_mode="HTML")
     return handler
 
 
@@ -211,32 +237,34 @@ router.message.register(_cmd_shortcut("domain", "🏛 Введите домен:
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
+    uid = message.from_user.id
+    show_osint = uid == OWNER_ID
     text = (
-        "👋 *Команды бота:*\n\n"
-        "🔍 *OSINT-пробив*\n"
-        "┣ По кнопкам: `/start` → OSINT-пробив\n"
-        "┣ `/phone <номер>` — пробив телефона\n"
-        "┣ `/email <email>` — пробив email\n"
-        "┣ `/user <username>` — поиск по соцсетям\n"
-        "┣ `/ip <ip>` — геолокация IP\n"
-        "┣ `/domain <домен>` — инфо по домену\n\n"
-        "🎲 *Анонимный чат*\n"
-        "┣ `/start` → Начать чат — поиск собеседника\n"
-        "┣ Кнопка «Завершить чат» — выход\n\n"
-        "🎰 *Казино*\n"
-        "┣ `/профиль` — профиль игрока\n"
-        "┣ `/игры` — список игр\n"
-        "┣ `/бонус` — ежедневный бонус\n"
-        "┣ `/топ` — топ игроков\n"
-        "┣ `/куб [ставка]` — игра в кости\n\n"
-        "⚙️ *Прочее*\n"
-        "┣ `/start` — главное меню\n"
-        "┣ `/stats` — статистика (только админ)\n"
-        "┣ `/help` — эта справка\n\n"
-        "💡 *Подсказка:* можно писать команду сразу с данными:\n"
-        "`/phone +79123456789` — без лишних вопросов"
+        "<b>👋 Команды бота</b>\n\n"
+        + ("<b>🔍 OSINT-пробив</b>\n"
+           "┃ По кнопкам: /start → OSINT-пробив\n"
+           "┃ <code>/phone</code> — пробив телефона\n"
+           "┃ <code>/email</code> — пробив email\n"
+           "┃ <code>/user</code> — поиск по соцсетям\n"
+           "┃ <code>/ip</code> — геолокация IP\n"
+           "┃ <code>/domain</code> — инфо по домену\n\n" if show_osint else "")
+        + "<b>🎲 Анонимный чат</b>\n"
+        "┃ /start → Начать чат — поиск собеседника\n"
+        "┃ Кнопка «Завершить чат» — выход\n\n"
+        "<b>🎰 Казино</b>\n"
+        "┃ <code>/профиль</code> — профиль игрока\n"
+        "┃ <code>/игры</code> — список игр\n"
+        "┃ <code>/бонус</code> — ежедневный бонус\n"
+        "┃ <code>/топ</code> — топ игроков\n"
+        "┃ <code>/куб [ставка]</code> — игра в кости\n\n"
+        "<b>⚙️ Прочее</b>\n"
+        "┃ <code>/start</code> — главное меню\n"
+        "┃ <code>/stats</code> — статистика (админ)\n"
+        "┃ <code>/help</code> — эта справка\n\n"
+        "💡 Подсказка: можно писать команду сразу с данными:\n"
+        "<code>/phone +79123456789</code> — без лишних вопросов"
     )
-    await message.answer(text, parse_mode="Markdown", reply_markup=main_kb())
+    await message.answer(text, parse_mode="HTML", reply_markup=main_kb(show_osint=show_osint))
 
 
 @router.callback_query(F.data.startswith("osint_"))
@@ -245,27 +273,27 @@ async def osint_callback(call: CallbackQuery):
     data = call.data
 
     if data == "osint_menu":
-        if not is_admin(uid):
+        if uid != OWNER_ID:
             await call.answer("❌ OSINT доступен только администраторам.", show_alert=True)
             return
-        await call.message.edit_text("🔍 *OSINT-пробив*\nВыберите тип данных:", parse_mode="Markdown",
+        await call.message.edit_text("<b>🔍 OSINT-пробив</b>\nВыберите тип данных:", parse_mode="HTML",
                                      reply_markup=osint_menu_kb())
         return
 
     prompts = {
-        "osint_phone": ("📱 Введите номер телефона\nПример: `+79123456789`", "phone"),
-        "osint_email": ("📧 Введите email\nПример: `example@mail.ru`", "email"),
-        "osint_username": ("🔎 Введите username\nПример: `ivanov`", "username"),
-        "osint_ip": ("🌐 Введите IP-адрес\nПример: `8.8.8.8`", "ip"),
-        "osint_domain": ("🏛 Введите домен\nПример: `google.com`", "domain"),
+        "osint_phone": ("📱 Введите номер телефона\nПример: <code>+79123456789</code>", "phone"),
+        "osint_email": ("📧 Введите email\nПример: <code>example@mail.ru</code>", "email"),
+        "osint_username": ("🔎 Введите username\nПример: <code>ivanov</code>", "username"),
+        "osint_ip": ("🌐 Введите IP-адрес\nПример: <code>8.8.8.8</code>", "ip"),
+        "osint_domain": ("🏛 Введите домен\nПример: <code>google.com</code>", "domain"),
     }
 
     if data in prompts:
-        if not is_admin(uid):
+        if uid != OWNER_ID:
             await call.answer("❌ OSINT доступен только администраторам.", show_alert=True)
             return
         msg, mode = prompts[data]
-        await call.message.edit_text(msg, parse_mode="Markdown")
+        await call.message.edit_text(msg, parse_mode="HTML")
         osint_waiting[uid] = (mode, call.message.chat.id, call.message.message_id)
         return
 
@@ -291,6 +319,9 @@ async def osint_text_handler(message: Message):
             log_osint_query(uid, "phone", text)
             if "error" not in result and result.get("e164"):
                 result["leak"] = await leak_search(result["e164"], "phone")
+                messengers = await phone_messenger_check(result["e164"])
+                if messengers:
+                    result["messengers"] = [f"{m['platform']} — <code>{m['url']}</code>" for m in messengers]
             formatted = _fmt_phone(result)
         elif mode == "email":
             result = await email_lookup(text)
@@ -301,6 +332,9 @@ async def osint_text_handler(message: Message):
         elif mode == "username":
             result = await username_lookup(text)
             log_osint_query(uid, "username", text)
+            tg = await telegram_profile(text)
+            if tg.get("found"):
+                result["telegram"] = tg
             formatted = _fmt_username(result)
         elif mode == "ip":
             result = await ip_lookup(text)
@@ -320,12 +354,13 @@ async def osint_text_handler(message: Message):
 
     try:
         await bot.edit_message_text(
-            formatted,
-            chat_id, prompt_msg_id,
-            parse_mode="Markdown",
+            text=formatted,
+            chat_id=chat_id,
+            message_id=prompt_msg_id,
+            parse_mode="HTML",
             reply_markup=osint_menu_kb(),
             disable_web_page_preview=True,
         )
     except Exception:
-        await message.answer(formatted, parse_mode="Markdown", disable_web_page_preview=True)
+        sent = await message.answer(formatted, parse_mode="HTML", disable_web_page_preview=True)
         await message.answer("Выберите действие:", reply_markup=osint_menu_kb())

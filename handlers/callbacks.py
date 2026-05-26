@@ -3,8 +3,13 @@ from aiogram.types import CallbackQuery
 from handlers.user import active_users, waiting_users
 from utils.helpers import is_banned
 from utils.keyboards import main_kb, chat_kb, search_kb
+from config import OWNER_ID
 
 router = Router()
+
+
+def _show_osint(uid: int) -> bool:
+    return uid == OWNER_ID
 
 
 @router.callback_query(F.data == "start_chat")
@@ -49,8 +54,9 @@ async def cb_leave_chat(call: CallbackQuery):
         return
     partner = active_users.pop(uid)
     active_users.pop(partner, None)
-    await call.bot.send_message(partner, "❌ Собеседник вышел.", reply_markup=main_kb())
-    await call.message.edit_text("👋 Чат завершён.", reply_markup=main_kb())
+    so = _show_osint(uid)
+    await call.bot.send_message(partner, "❌ Собеседник вышел.", reply_markup=main_kb(show_osint=so))
+    await call.message.edit_text("👋 Чат завершён.", reply_markup=main_kb(show_osint=so))
 
 
 @router.callback_query(F.data == "cancel_search")
@@ -60,7 +66,7 @@ async def cb_cancel_search(call: CallbackQuery):
         await call.answer("❌ Вы не в поиске.", show_alert=True)
         return
     waiting_users.remove(uid)
-    await call.message.edit_text("❌ Поиск отменён.", reply_markup=main_kb())
+    await call.message.edit_text("❌ Поиск отменён.", reply_markup=main_kb(show_osint=_show_osint(uid)))
     await call.answer()
 
 
@@ -80,7 +86,7 @@ async def cb_my_profile(call: CallbackQuery):
         )
     else:
         text = f"👤 Профиль\n\n🆔 ID: {uid}\n📝 Зарегистрируйтесь через /start"
-    await call.message.edit_text(text, reply_markup=main_kb())
+    await call.message.edit_text(text, reply_markup=main_kb(show_osint=_show_osint(uid)))
     await call.answer()
 
 
@@ -99,7 +105,7 @@ async def cb_my_stats(call: CallbackQuery):
         f"💬 В чате: {in_chat}\n"
         f"🎰 Казино: используйте /казино"
     )
-    await call.message.edit_text(text, reply_markup=main_kb())
+    await call.message.edit_text(text, reply_markup=main_kb(show_osint=_show_osint(uid)))
     await call.answer()
 
 
@@ -121,33 +127,39 @@ async def cb_report_chat(call: CallbackQuery):
 
 @router.callback_query(F.data == "back_main")
 async def cb_back_main(call: CallbackQuery):
+    uid = call.from_user.id
     show_chat = call.message.chat.type == "private"
-    await call.message.edit_text("👋 Главное меню", reply_markup=main_kb(show_chat=show_chat))
+    await call.message.edit_text("👋 Главное меню", reply_markup=main_kb(show_chat=show_chat, show_osint=_show_osint(uid)))
     await call.answer()
 
 
 @router.callback_query(F.data == "help")
 async def cb_help(call: CallbackQuery):
-    text = (
-        "👋 *Команды бота:*\n\n"
-        "🔍 *OSINT-пробив*\n"
-        "┣ `/phone <номер>` — пробив телефона\n"
-        "┣ `/email <email>` — пробив email\n"
-        "┣ `/user <username>` — поиск по соцсетям\n"
-        "┣ `/ip <ip>` — геолокация IP\n"
-        "┣ `/domain <домен>` — инфо по домену\n\n"
-        "🎲 *Анонимный чат*\n"
-        "┣ Кнопка «Анонимный чат» — поиск собеседника\n"
-        "┣ Кнопка «Завершить чат» — выход\n\n"
-        "🎰 *Казино*\n"
-        "┣ Кнопка «Казино» — меню казино\n"
-        "┣ `/куб [ставка]` — игра в кости\n\n"
-        "⚙️ *Прочее*\n"
-        "┣ `/start` — главное меню\n"
-        "┣ `/stats` — статистика (админ)\n"
-        "┣ `/help` — эта справка\n\n"
-        "💡 *Подсказка:* можно писать команду сразу с данными:\n"
-        "`/phone +79123456789` — без лишних вопросов"
+    uid = call.from_user.id
+    show_osint = _show_osint(uid)
+    parts = ["<b>👋 Команды бота</b>\n"]
+    if show_osint:
+        parts.append(
+            "<b>🔍 OSINT-пробив</b>\n"
+            "┃ <code>/phone</code> — пробив телефона\n"
+            "┃ <code>/email</code> — пробив email\n"
+            "┃ <code>/user</code> — поиск по соцсетям\n"
+            "┃ <code>/ip</code> — геолокация IP\n"
+            "┃ <code>/domain</code> — инфо по домену\n"
+        )
+    parts.append(
+        "<b>🎲 Анонимный чат</b>\n"
+        "┃ Кнопка «Анонимный чат» — поиск собеседника\n"
+        "┃ «Завершить чат» — выход\n\n"
+        "<b>🎰 Казино</b>\n"
+        "┃ Кнопка «Казино» — меню\n"
+        "┃ <code>/куб [ставка]</code> — кости\n\n"
+        "<b>⚙️ Прочее</b>\n"
+        "┃ <code>/start</code> — главное меню\n"
+        "┃ <code>/help</code> — эта справка\n"
+        "┃ <code>/stats</code> — статистика (админ)\n\n"
+        "💡 <code>/phone +79123456789</code> — без лишних вопросов"
     )
-    await call.message.edit_text(text, parse_mode="Markdown", reply_markup=main_kb())
+    text = "\n".join(parts)
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=main_kb(show_osint=show_osint))
     await call.answer()

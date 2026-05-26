@@ -67,28 +67,47 @@ def init_db():
             timestamp TEXT
         )
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS moderation (
+            user_id INTEGER PRIMARY KEY,
+            warns INTEGER DEFAULT 0,
+            muted_until TEXT,
+            modded_by TEXT
+        )
+    """)
 
     conn.commit()
+
+    # migration for existing DBs
+    try:
+        cur.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
+        conn.commit()
+    except:
+        pass
+    try:
+        cur.execute("ALTER TABLE bans ADD COLUMN warned_by TEXT")
+        conn.commit()
+    except:
+        pass
 
 
 def close_db():
     global conn, cur
-    if cur:
-        cur.close()
-        cur = None
     if conn:
         conn.close()
         conn = None
+        cur = None
 
 
 def log_osint_query(user_id: int, query_type: str, query_value: str):
-    if not cur:
+    global cur
+    if cur is None:
         return
     try:
         cur.execute(
             "INSERT INTO osint_logs (user_id, query_type, query_value, timestamp) VALUES (?, ?, ?, ?)",
-            (user_id, query_type, query_value, datetime.datetime.now().isoformat())
+            (user_id, query_type, query_value, datetime.datetime.now().isoformat()),
         )
         conn.commit()
-    except:
+    except Exception:
         pass

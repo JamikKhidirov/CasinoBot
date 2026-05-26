@@ -295,8 +295,9 @@ async def cb_casino_menu(call: CallbackQuery):
         user = await get_user(call.from_user.id)
     await call.message.edit_text(
         f"🎰 <b>Меню казино</b>\n\n"
-        f"💰 Ваш баланс: {user['balance']} монет\n"
-        f"🏆 Побед: {user['wins']} / {user['games_played']} игр",
+        f"┃ 💰 <b>Баланс:</b> {user['balance']} 🪙\n"
+        f"┃ 🏆 <b>Побед:</b> {user['wins']} / {user['games_played']} игр",
+        parse_mode="HTML",
         reply_markup=casino_menu_kb(user_id=call.from_user.id),
     )
     await call.answer()
@@ -304,10 +305,10 @@ async def cb_casino_menu(call: CallbackQuery):
 
 @router.callback_query(F.data == "casino_games")
 async def cb_casino_games(call: CallbackQuery):
-    text = "🎮 <b>Выберите игру:</b>\n\n"
+    text = "<b>🎮 Выберите игру:</b>\n\n"
     for game_type, cfg in GAMES_CONFIG.items():
-        text += f"{cfg['emoji']} <b>{game_type.capitalize()}</b> — /{cfg['command']} [ставка]\n"
-    await call.message.edit_text(text, reply_markup=game_selection_kb())
+        text += f"┃ {cfg['emoji']} <b>{game_type.capitalize()}</b>  →  <code>/{cfg['command']} [ставка]</code>\n"
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=game_selection_kb())
     await call.answer()
 
 
@@ -319,19 +320,19 @@ async def cb_casino_profile(call: CallbackQuery):
         user = await get_user(call.from_user.id)
 
     text = (
-        f"📊 Профиль игрока {call.from_user.first_name}\n\n"
-        f"🆔 ID: {user['user_id']}\n"
-        f"💰 Баланс: {user['balance']} монет\n"
-        f"🎮 Сыграно игр: {user['games_played']}\n"
-        f"🏆 Побед: {user['wins']}\n"
-        f"📅 Последний бонус: {user['last_bonus'] or 'ещё не получал'}"
+        f"<b>📊 Профиль игрока</b> {call.from_user.first_name}\n\n"
+        f"┃ 🆔 ID: <code>{user['user_id']}</code>\n"
+        f"┃ 💰 <b>Баланс:</b> {user['balance']} 🪙\n"
+        f"┃ 🎮 <b>Сыграно игр:</b> {user['games_played']}\n"
+        f"┃ 🏆 <b>Побед:</b> {user['wins']}\n"
+        f"┃ 📅 <b>Последний бонус:</b> {user['last_bonus'] or 'ещё не получал'}"
     )
     markup = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="deposit")]
         ]
     )
-    await call.message.answer(text, reply_markup=markup)
+    await call.message.answer(text, parse_mode="HTML", reply_markup=markup)
     await call.answer()
 
 
@@ -349,11 +350,12 @@ async def cb_casino_top(call: CallbackQuery):
     if not rows:
         await call.message.answer("❌ Пока нет данных о пользователях.")
     else:
-        text = "🏆 Топ 10 игроков:\n\n"
+        text = "<b>🏆 Топ 10 игроков</b>\n\n"
         for i, row in enumerate(rows, 1):
             name = row["username"] or f"user_{row['user_id']}"
-            text += f"{i}. @{name} — {row['balance']} монет\n"
-        await call.message.answer(text)
+            medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "▫️"
+            text += f"{medal} <b>{i}.</b> @{name}  →  {row['balance']} 🪙\n"
+        await call.message.answer(text, parse_mode="HTML")
     await call.answer()
 
 
@@ -405,20 +407,19 @@ async def cb_casino_active(call: CallbackQuery):
             await call.answer()
             return
 
-        text = "🎮 Активные игры:\n\n"
+        text = "<b>🎮 Активные игры:</b>\n\n"
         for g in active_games.values():
             if g.is_finished:
                 continue
             p1 = await get_username(g.player1)
-            p2 = await get_username(g.player2) if g.player2 else "Ожидает второго игрока"
+            p2 = await get_username(g.player2) if g.player2 else "⏳ Ожидает второго игрока"
             text += (
-                f"🔹 Игра в {GAMES_CONFIG[g.game_type]['emoji']}\n"
-                f"💵 Ставка: {g.bet} монет\n"
-                f"Игрок 1: {p1}\n"
-                f"Игрок 2: {p2}\n"
-                f"ID: {g.room_id}\n\n"
+                f"┃ {GAMES_CONFIG[g.game_type]['emoji']} <b>{GAMES_CONFIG[g.game_type]['action']}</b>\n"
+                f"┃ 💵 Ставка: <b>{g.bet}</b> 🪙\n"
+                f"┃ 🆔 Комната: <code>{g.room_id[:8]}...</code>\n"
+                f"┃ 👤 {p1} vs {p2}\n\n"
             )
-    await call.message.answer(text)
+    await call.message.answer(text, parse_mode="HTML")
     await call.answer()
 
 
@@ -445,8 +446,9 @@ async def cb_casino_unlock(call: CallbackQuery):
             del active_games[rid]
 
     await call.message.answer(
-        f"✅ Все ваши игры отменены! Возвращено: {refunded} монет\n"
-        "Теперь вы можете создавать новые игры!"
+        f"✅ <b>Все ваши игры отменены!</b>\n🔙 Возвращено: <b>{refunded}</b> 🪙\n"
+        "Теперь вы можете создавать новые игры!",
+        parse_mode="HTML",
     )
     await call.answer()
 
@@ -463,12 +465,12 @@ async def cmd_profile(message: Message):
         return
 
     text = (
-        f"📊 Профиль игрока {message.from_user.first_name}\n\n"
-        f"🆔 ID: {user['user_id']}\n"
-        f"💰 Баланс: {user['balance']} монет\n"
-        f"🎮 Сыграно игр: {user['games_played']}\n"
-        f"🏆 Побед: {user['wins']}\n"
-        f"📅 Последний бонус: {user['last_bonus'] or 'ещё не получал'}"
+        f"<b>📊 Профиль игрока</b> {message.from_user.first_name}\n\n"
+        f"┃ 🆔 ID: <code>{user['user_id']}</code>\n"
+        f"┃ 💰 <b>Баланс:</b> {user['balance']} 🪙\n"
+        f"┃ 🎮 <b>Сыграно игр:</b> {user['games_played']}\n"
+        f"┃ 🏆 <b>Побед:</b> {user['wins']}\n"
+        f"┃ 📅 <b>Последний бонус:</b> {user['last_bonus'] or 'ещё не получал'}"
     )
     markup = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -570,8 +572,8 @@ async def send_admin_notification(user_id: int, amount: int, deposit_id: int):
         markup = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
-                    InlineKeyboardButton("💳 Отправить реквизиты", callback_data=f"provide_{deposit_id}"),
-                    InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{deposit_id}"),
+                    InlineKeyboardButton(text="💳 Отправить реквизиты", callback_data=f"provide_{deposit_id}"),
+                    InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_{deposit_id}"),
                 ]
             ]
         )
@@ -619,7 +621,7 @@ async def cb_provide_details(call: CallbackQuery, state: FSMContext):
         f"Получатель: Иван И.",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton("❌ Отмена", callback_data="cancel_provide")]
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_provide")]
         ])
     )
     await call.answer()
@@ -628,7 +630,7 @@ async def cb_provide_details(call: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "cancel_provide")
 async def cb_cancel_provide(call: CallbackQuery, state: FSMContext):
     await state.clear()
-    await call.message.edit_text("❌ Ввод реквизитов отменён.")
+    await call.message.edit_text("❌ <b>Ввод реквизитов отменён.</b>", parse_mode="HTML")
     await call.answer()
 
 
@@ -657,8 +659,8 @@ async def process_payment_details(message: Message, state: FSMContext):
     await state.clear()
 
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton("✅ Я оплатил", callback_data=f"paid_{deposit_id}"),
-         InlineKeyboardButton("❌ Отмена", callback_data=f"reject_{deposit_id}")]
+        [InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"paid_{deposit_id}"),
+         InlineKeyboardButton(text="❌ Отмена", callback_data=f"reject_{deposit_id}")]
     ])
     await get_bot().send_message(
         user_id,
@@ -699,8 +701,8 @@ async def cb_user_paid(call: CallbackQuery):
         await conn.close()
 
     approve_markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton("✅ Подтвердить", callback_data=f"approve_{deposit_id}"),
-         InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{deposit_id}")]
+        [InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"approve_{deposit_id}"),
+         InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_{deposit_id}")]
     ])
     username = await get_username(row["user_id"])
     await get_bot().send_message(
@@ -790,6 +792,80 @@ async def cb_reject(call: CallbackQuery):
         pass
 
 
+@router.callback_query(F.data.startswith("admin_reject_"))
+async def cb_admin_reject(call: CallbackQuery):
+    if not await has_perm(call.from_user.id, "approve_deposits"):
+        await call.answer("❌ Доступ запрещён!", show_alert=True)
+        return
+
+    deposit_id = int(call.data.split("_", 2)[2])
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT user_id, amount, status FROM deposit_requests WHERE id = ?",
+            (deposit_id,),
+        )
+        row = await cursor.fetchone()
+        if not row or row["status"] in ("approved", "rejected"):
+            await call.answer("❌ Запрос уже обработан.", show_alert=True)
+            return
+
+        await conn.execute(
+            "UPDATE deposit_requests SET status = 'rejected' WHERE id = ?",
+            (deposit_id,),
+        )
+        await conn.commit()
+        await get_bot().send_message(row["user_id"], "❌ Ваш запрос на пополнение был отклонён.")
+    finally:
+        await conn.close()
+
+    await call.answer("❌ Отклонено")
+    # Refresh the pending list
+    await cb_casino_admin_pending(call)
+
+
+@router.message(Command("одобрить"))
+async def cmd_approve_deposit(message: Message):
+    if not await has_perm(message.from_user.id, "approve_deposits"):
+        await clean_reply(message, "❌ Доступ запрещён!")
+        return
+
+    parts = message.text.split()
+    if len(parts) < 2:
+        await clean_reply(message, "❌ Формат: <code>/одобрить ID_запроса</code>")
+        return
+
+    try:
+        deposit_id = int(parts[1])
+    except ValueError:
+        await clean_reply(message, "❌ Укажите числовой ID запроса.")
+        return
+
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT user_id, amount FROM deposit_requests WHERE id = ? AND status = 'paid'",
+            (deposit_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            await clean_reply(message, "❌ Запрос не найден или ещё не оплачен пользователем.")
+            return
+
+        user_id = row["user_id"]
+        amount = row["amount"]
+        await update_balance(user_id, amount, "deposit")
+        await conn.execute(
+            "UPDATE deposit_requests SET status = 'approved' WHERE id = ?",
+            (deposit_id,),
+        )
+        await conn.commit()
+        await get_bot().send_message(user_id, f"✅ Ваш баланс пополнен на {amount} монет!")
+        await clean_reply(message, f"✅ Запрос #{deposit_id} одобрен. Баланс пополнен на {amount} монет.")
+    finally:
+        await conn.close()
+
+
 @router.message(Command("пополнить"))
 async def cmd_admin_add_balance(message: Message):
     if not await has_perm(message.from_user.id, "add_balance"):
@@ -835,7 +911,7 @@ async def cmd_daily_bonus(message: Message):
             else:
                 last_date = last_bonus_val
             if today_d <= last_date:
-                await message.reply("💰 Вы уже получили свой сегодняшний бонус!")
+                await message.reply("💰 Вы уже получили свой ежедневный бонус! Приходите завтра 🎁")
                 return
         except (ValueError, TypeError) as e:
             logger.error(f"Ошибка даты бонуса для {user_id}: {e}")
@@ -851,7 +927,7 @@ async def cmd_daily_bonus(message: Message):
     finally:
         await conn.close()
 
-    await message.reply(f"🎉 Вы получили ежедневный бонус в размере {DAILY_BONUS} монет!")
+    await message.reply(f"🎉 <b>Ежедневный бонус получен!</b>\n💰 +{DAILY_BONUS} 🪙 на ваш баланс!", parse_mode="HTML")
 
 
 @router.message(Command("топ"))
@@ -869,20 +945,22 @@ async def cmd_top(message: Message):
         await message.answer("❌ Пока нет данных о пользователях.")
         return
 
-    text = "🏆 Топ 10 игроков:\n\n"
+    text = "<b>🏆 Топ 10 игроков</b>\n\n"
     for i, row in enumerate(rows, 1):
         name = row["username"] or f"user_{row['user_id']}"
-        text += f"{i}. @{name} — {row['balance']} монет\n"
+        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "▫️"
+        text += f"{medal} <b>{i}.</b> @{name}  →  {row['balance']} 🪙\n"
 
-    await message.answer(text)
+    await message.answer(text, parse_mode="HTML")
 
 
 @router.message(Command("игры"))
 async def cmd_games(message: Message):
-    text = "🕹 Доступные игры:\n\n"
+    text = "<b>🕹 Доступные игры:</b>\n\n"
     for game_type, cfg in GAMES_CONFIG.items():
-        text += f"/{cfg['command']} [ставка] — {game_type} {cfg['emoji']}\n"
-    await message.answer(text)
+        text += f"┃ {cfg['emoji']} <b>{game_type.capitalize()}</b>  →  <code>/{cfg['command']} [ставка]</code>\n"
+    text += "\n💡 Нажмите /<b>профиль</b> чтобы посмотреть баланс"
+    await message.answer(text, parse_mode="HTML")
 
 
 @router.message(Command("активные"))
@@ -1065,8 +1143,9 @@ async def cb_casino_admin(call: CallbackQuery):
         return
     perms = await get_admin_perms(uid)
     await call.message.edit_text(
-        "⚙️ <b>Админ-панель казино</b>\n\n"
+        "<b>⚙️ Админ-панель казино</b>\n\n"
         "Выберите действие:",
+        parse_mode="HTML",
         reply_markup=casino_admin_kb(perms),
     )
     await call.answer()
@@ -1080,32 +1159,27 @@ async def cb_casino_admin_players(call: CallbackQuery):
         return
     conn = await get_db()
     try:
-        cursor = await conn.execute("SELECT * FROM users ORDER BY user_id")
-        players = await cursor.fetchall()
+        cursor = await conn.execute("SELECT * FROM casino_admins ORDER BY admin_id")
+        admins = await cursor.fetchall()
     finally:
         await conn.close()
 
-    if not players:
-        await call.message.answer("❌ Нет зарегистрированных игроков.")
+    if not admins:
+        await call.message.edit_text("👥 Админы не найдены.")
         await call.answer()
         return
 
-    parts = []
-    chunk = []
-    for p in players:
-        name = f"@{p['username']}" if p["username"] else f"ID_{p['user_id']}"
-        chunk.append(
-            f"👤 ID: {p['user_id']} | {name}\n"
-            f"💰 {p['balance']} | 🎮 {p['games_played']} | 🏆 {p['wins']}"
-        )
-        if len(chunk) == 15:
-            parts.append("\n".join(chunk))
-            chunk = []
-    if chunk:
-        parts.append("\n".join(chunk))
-
-    for i, part in enumerate(parts):
-        await call.message.answer(f"👥 Игроки ({len(players)}):\n\n{part}" if i == 0 else part)
+    lines = ["<b>👑 Администраторы казино:</b>\n"]
+    for a in admins:
+        name = await get_username(a["admin_id"])
+        lines.append(f"┣ {name} (ID: <code>{a['admin_id']}</code>)")
+    await call.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin")]
+        ])
+    )
     await call.answer()
 
 
@@ -1159,13 +1233,37 @@ async def cb_casino_admin_pending(call: CallbackQuery):
 
     if not pending:
         await call.message.edit_text("📋 Нет ожидающих запросов на пополнение.")
-    else:
-        text = "📋 <b>Ожидающие запросы:</b>\n\n"
-        for req in pending:
-            username = await get_username(req["user_id"])
-            text += f"┣ 👤 {username}\n┃ 💵 {req['amount']} монет\n┃ 📅 {req['created']}\n\n"
-        text += "\n💡 Для одобрения: <code>/одобрить user_id</code>"
-        await call.message.edit_text(text, parse_mode="HTML")
+        await call.answer()
+        return
+
+    text = "<b>📋 Ожидающие запросы:</b>\n\n"
+    buttons = []
+    for req in pending[:10]:
+        username = await get_username(req["user_id"])
+        text += (
+            f"┃ <b>#{req['id']}</b>\n"
+            f"┃ 👤 {username}\n"
+            f"┃ 🆔 <code>{req['user_id']}</code>\n"
+            f"┃ 💵 {req['amount']} монет\n"
+            f"┃ 📅 {req['created']}\n\n"
+        )
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"💳 #{req['id']} {username[:15]}" if len(username) <= 15 else f"💳 #{req['id']}",
+                callback_data=f"provide_{req['id']}"
+            ),
+            InlineKeyboardButton(
+                text="❌", callback_data=f"admin_reject_{req['id']}"
+            ),
+        ])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin")])
+
+    if len(pending) > 10:
+        text += f"┃ <i>...и ещё {len(pending) - 10} запросов</i>\n\n"
+
+    text += "💡 Нажмите кнопку с номером запроса, чтобы обработать."
+
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await call.answer()
 
 
@@ -1269,16 +1367,23 @@ ADMIN_COMMANDS = {
 
 async def _send_admin_help(target, user_id: int):
     perms = await get_admin_perms(user_id)
-    text = "📖 <b>Админ-команды казино</b>\n\n"
+    text = "<b>📖 Админ-команды казино</b>\n\n"
     for cmd, desc in ADMIN_COMMANDS.items():
-        text += f"┣ <code>{cmd}</code>\n┃ └ {desc}\n\n"
+        safe_cmd = cmd.replace("<", "&lt;").replace(">", "&gt;")
+        text += f"┣ <code>{safe_cmd}</code>\n┃ └ {desc}\n\n"
     text += f"┣ <b>Ваши права:</b> {', '.join(f'<code>{p}</code>' for p in perms) if perms else '<i>нет прав</i>'}"
     buttons = []
     for cmd, desc in ADMIN_COMMANDS.items():
         cmd_clean = cmd.split(" ")[0]
         buttons.append([InlineKeyboardButton(text=f"📋 {cmd_clean}", callback_data=f"admin_cmd_{cmd_clean[1:]}")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin")])
-    await target.answer(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    try:
+        await target.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    except:
+        try:
+            await target.answer(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+        except:
+            pass
 
 
 @router.message(Command("admin"))
@@ -1570,7 +1675,7 @@ async def cb_cancel_game(call: CallbackQuery):
         game.is_finished = True
         del active_games[room_id]
         logger.info(f"cancel_game: {room_id} отменена, ставка {game.bet} возвращена")
-    await call.message.edit_text("❌ Игра отменена создателем.\n💰 Ставка возвращена.")
+    await call.message.edit_text("❌ <b>Игра отменена</b>\n💰 Ставка возвращена.", parse_mode="HTML")
     await call.answer("✅ Игра отменена, ставка возвращена.", show_alert=True)
 
 
@@ -1597,7 +1702,7 @@ async def cmd_cancel_all_games(message: Message):
         for rid in to_delete:
             del active_games[rid]
     if refunded:
-        await message.reply(f"✅ Отменено игр: {refunded}\n💰 Возвращено: {total_refund} монет.")
+        await message.reply(f"✅ <b>Отменено игр:</b> {refunded}\n💰 <b>Возвращено:</b> {total_refund} 🪙", parse_mode="HTML")
     else:
         await message.reply("❌ Нет активных игр для отмены.")
 
