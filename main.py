@@ -44,13 +44,7 @@ async def main():
         logger.error(f"Ошибка инициализации БД: {e}")
         return
 
-    session = None
-    if config.PROXY_URL:
-        from aiogram.client.session.aiohttp import AiohttpSession
-        session = AiohttpSession(proxy=config.PROXY_URL)
-        logger.info(f"Прокси: {config.PROXY_URL}")
-
-    bot = Bot(token=config.BOT_TOKEN, session=session) if config.PROXY_URL else Bot(token=config.BOT_TOKEN)
+    bot = Bot(token=config.BOT_TOKEN)
     casino_setup(bot)
     dp = Dispatcher()
 
