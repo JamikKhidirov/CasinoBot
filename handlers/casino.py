@@ -572,23 +572,23 @@ async def cb_admin_decision(call: CallbackQuery):
 @router.message(Command("пополнить"))
 async def cmd_admin_add_balance(message: Message):
     if not await has_perm(message.from_user.id, "add_balance"):
-        await message.reply("❌ Доступ запрещён!")
+        await clean_reply(message, "❌ Доступ запрещён!")
         return
 
     parts = message.text.split()
     if len(parts) != 3:
-        await message.reply("❌ Формат: /пополнить [user_id] [кол-во монет]")
+        await clean_reply(message, "❌ Формат: <code>/пополнить user_id сумма</code>")
         return
 
     try:
         user_id = int(parts[1])
         amount = int(parts[2])
     except (ValueError, IndexError):
-        await message.reply("❌ Формат: /пополнить [user_id] [кол-во монет]")
+        await clean_reply(message, "❌ Формат: <code>/пополнить user_id сумма</code>")
         return
 
     await update_balance(user_id, amount, "admin_add")
-    await message.reply(f"Баланс пользователя {user_id} пополнен на {amount} монет! ✅")
+    await clean_reply(message, f"✅ Баланс пользователя <code>{user_id}</code> пополнен на <b>{amount}</b> монет!")
     await get_bot().send_message(user_id, f"Администратор пополнил ваш баланс на {amount} монет! 🎉")
 
 
@@ -715,7 +715,7 @@ async def cmd_force_unlock(message: Message):
 @router.message(Command("игроки"))
 async def cmd_all_players(message: Message):
     if not await has_perm(message.from_user.id, "view_players"):
-        await message.reply("❌ Доступ запрещён!")
+        await clean_reply(message, "❌ Доступ запрещён!")
         return
 
     conn = await get_db()
@@ -726,7 +726,7 @@ async def cmd_all_players(message: Message):
         await conn.close()
 
     if not players:
-        await message.reply("❌ Нет зарегистрированных игроков.")
+        await clean_reply(message, "❌ Нет зарегистрированных игроков.")
         return
 
     parts = []
@@ -909,12 +909,12 @@ async def cb_casino_admin_stats(call: CallbackQuery):
 
     text = (
         f"📊 <b>Статистика казино</b>\n\n"
-        f"👥 Всего игроков: {total_users}\n"
-        f"🎮 Активных игроков: {active_players}\n"
-        f"💰 Общий баланс: {total_balance} монет\n"
-        f"📋 Ожидающих запросов: {pending}"
+        f"┣ 👥 Всего игроков: {total_users}\n"
+        f"┣ 🎮 Активных: {active_players}\n"
+        f"┣ 💰 Баланс: {total_balance} монет\n"
+        f"┣ 📋 Ожидающих запросов: {pending}"
     )
-    await call.message.answer(text)
+    await call.message.edit_text(text, parse_mode="HTML")
     await call.answer()
 
 
@@ -934,13 +934,14 @@ async def cb_casino_admin_pending(call: CallbackQuery):
         await conn.close()
 
     if not pending:
-        await call.message.answer("📋 Нет ожидающих запросов на пополнение.")
+        await call.message.edit_text("📋 Нет ожидающих запросов на пополнение.")
     else:
         text = "📋 <b>Ожидающие запросы:</b>\n\n"
         for req in pending:
             username = await get_username(req["user_id"])
-            text += f"👤 {username}\n💵 {req['amount']} монет\n📅 {req['created']}\n\n"
-        await call.message.answer(text)
+            text += f"┣ 👤 {username}\n┃ 💵 {req['amount']} монет\n┃ 📅 {req['created']}\n\n"
+        text += "\n💡 Для одобрения: <code>/одобрить user_id</code>"
+        await call.message.edit_text(text, parse_mode="HTML")
     await call.answer()
 
 
@@ -950,10 +951,15 @@ async def cb_casino_admin_add(call: CallbackQuery):
     if not await has_perm(uid, "add_balance"):
         await call.answer(ADMIN_ERROR, show_alert=True)
         return
-    await call.message.answer(
-        "💰 Чтобы пополнить баланс пользователя, используйте:\n\n"
-        "<code>/пополнить user_id сумма</code>\n\n"
-        "Пример: <code>/пополнить 123456789 1000</code>"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Скопировать пример", callback_data="admin_copy_addbalance")]
+    ])
+    await call.message.edit_text(
+        "💰 <b>Пополнение баланса</b>\n\n"
+        "┣ Команда: <code>/пополнить user_id сумма</code>\n"
+        "┣ Пример: <code>/пополнить 123456789 1000</code>\n\n"
+        "💡 Просто отправьте команду в чат, заменив ID и сумму.",
+        parse_mode="HTML", reply_markup=kb,
     )
     await call.answer()
 
@@ -965,18 +971,22 @@ async def cb_casino_admin_manage(call: CallbackQuery):
         return
     text = (
         "👑 <b>Управление админами</b>\n\n"
-        "Команды для управления:\n\n"
-        "<code>/addadmin user_id</code> — добавить админа\n"
-        "<code>/removeadmin user_id</code> — удалить админа\n"
-        "<code>/admins</code> — список админов\n"
-        "<code>/setperm user_id право</code> — выдать право\n"
-        "<code>/removeperm user_id право</code> — отозвать право\n"
-        "<code>/perms user_id</code> — права пользователя\n\n"
-        "<b>Права (permissions):</b>\n"
+        "┣ <code>/addadmin user_id</code> — добавить админа\n"
+        "┣ <code>/removeadmin user_id</code> — удалить админа\n"
+        "┣ <code>/admins</code> — список админов\n"
+        "┣ <code>/setperm user_id право</code> — выдать право\n"
+        "┣ <code>/removeperm user_id право</code> — отозвать право\n"
+        "┣ <code>/perms user_id</code> — права пользователя\n\n"
+        "━ <b>Права (permissions):</b>\n"
     )
     for perm, desc in PERMISSIONS.items():
-        text += f"  • <code>{perm}</code> — {desc}\n"
-    await call.message.answer(text)
+        text += f"┃ • <code>{perm}</code> — {desc}\n"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👥 Админы", callback_data="casino_admin_players"),
+         InlineKeyboardButton(text="📋 Команды", callback_data="casino_admin_help")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin")],
+    ])
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
     await call.answer()
 
 
@@ -988,6 +998,34 @@ async def cb_casino_admin_help(call: CallbackQuery):
         return
     await _send_admin_help(call.message, uid)
     await call.answer()
+
+
+@router.callback_query(F.data == "admin_copy_addbalance")
+async def cb_admin_copy_add(call: CallbackQuery):
+    await call.message.answer("📋 Просто отправьте:\n<code>/пополнить 123456789 1000</code>\n(замените ID и сумму)", parse_mode="HTML")
+    await call.answer()
+
+
+# ─── Admin helpers — clean replies, edit instead of spam ────────────
+
+
+async def clean_reply(message: Message, text: str, parse_mode: str = "HTML", keyboard=None):
+    """Delete user message, send reply with auto-delete after 60s."""
+    try:
+        await message.delete()
+    except:
+        pass
+    sent = await message.reply(text, parse_mode=parse_mode, reply_markup=keyboard)
+    asyncio.ensure_future(_auto_delete(sent, 60))
+
+
+async def _auto_delete(msg: Message, delay: int):
+    """Delete a message after delay seconds."""
+    await asyncio.sleep(delay)
+    try:
+        await msg.delete()
+    except:
+        pass
 
 
 # ─── Admin commands ──────────────────────────────────────────────────
@@ -1009,9 +1047,14 @@ async def _send_admin_help(target, user_id: int):
     perms = await get_admin_perms(user_id)
     text = "📖 <b>Админ-команды казино</b>\n\n"
     for cmd, desc in ADMIN_COMMANDS.items():
-        text += f"<code>{cmd}</code>\n└ {desc}\n\n"
-    text += f"<b>Ваши права:</b> {', '.join(perms) if perms else 'нет прав'}"
-    await target.answer(text)
+        text += f"┣ <code>{cmd}</code>\n┃ └ {desc}\n\n"
+    text += f"┣ <b>Ваши права:</b> {', '.join(f'<code>{p}</code>' for p in perms) if perms else '<i>нет прав</i>'}"
+    buttons = []
+    for cmd, desc in ADMIN_COMMANDS.items():
+        cmd_clean = cmd.split(" ")[0]
+        buttons.append([InlineKeyboardButton(text=f"📋 {cmd_clean}", callback_data=f"admin_cmd_{cmd_clean[1:]}")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin")])
+    await target.answer(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
 
 @router.message(Command("admin"))
@@ -1026,18 +1069,18 @@ async def cmd_admin_help(message: Message):
 @router.message(Command("addadmin"))
 async def cmd_add_admin(message: Message):
     if not is_owner(message.from_user.id):
-        await message.reply("❌ Только владелец может добавлять админов!")
+        await clean_reply(message, "❌ Только владелец может добавлять админов!")
         return
 
     parts = message.text.split()
     if len(parts) < 2:
-        await message.reply("❌ Укажите ID пользователя.\nФормат: <code>/addadmin user_id</code>")
+        await clean_reply(message, "❌ Укажите ID пользователя.\nФормат: <code>/addadmin user_id</code>")
         return
 
     try:
         user_id = int(parts[1])
     except ValueError:
-        await message.reply("❌ Некорректный ID!")
+        await clean_reply(message, "❌ Некорректный ID!")
         return
 
     conn = await get_db()
@@ -1050,29 +1093,29 @@ async def cmd_add_admin(message: Message):
     finally:
         await conn.close()
 
-    await message.reply(f"✅ Пользователь {user_id} добавлен в администраторы!\n"
-                        f"Выдайте ему права командой:\n<code>/setperm {user_id} право</code>")
+    await clean_reply(message, f"✅ Пользователь <code>{user_id}</code> добавлен в администраторы!\n"
+                               f"Выдайте ему права: <code>/setperm {user_id} право</code>")
 
 
 @router.message(Command("removeadmin"))
 async def cmd_remove_admin(message: Message):
     if not is_owner(message.from_user.id):
-        await message.reply("❌ Только владелец может удалять админов!")
+        await clean_reply(message, "❌ Только владелец может удалять админов!")
         return
 
     parts = message.text.split()
     if len(parts) < 2:
-        await message.reply("❌ Укажите ID пользователя.")
+        await clean_reply(message, "❌ Укажите ID пользователя.")
         return
 
     try:
         user_id = int(parts[1])
     except ValueError:
-        await message.reply("❌ Некорректный ID!")
+        await clean_reply(message, "❌ Некорректный ID!")
         return
 
     if is_owner(user_id):
-        await message.reply("❌ Нельзя удалить владельца!")
+        await clean_reply(message, "❌ Нельзя удалить владельца!")
         return
 
     conn = await get_db()
@@ -1083,7 +1126,7 @@ async def cmd_remove_admin(message: Message):
     finally:
         await conn.close()
 
-    await message.reply(f"✅ Пользователь {user_id} удалён из администраторов.")
+    await clean_reply(message, f"✅ Пользователь <code>{user_id}</code> удалён из администраторов.")
 
 
 @router.message(Command("admins"))
@@ -1113,19 +1156,19 @@ async def cmd_list_admins(message: Message):
                 f"📅 {a['added_at']}\n"
                 f"🔑 Права: {a['perms'] or 'не назначены'}\n\n"
             )
-    await message.answer(text)
+    await clean_reply(message, text)
 
 
 @router.message(Command("setperm"))
 async def cmd_set_perm(message: Message):
     if not is_owner(message.from_user.id):
-        await message.reply("❌ Только владелец может назначать права!")
+        await clean_reply(message, "❌ Только владелец может назначать права!")
         return
 
     parts = message.text.split()
     if len(parts) < 3:
         perms_list = "\n".join(f"• <code>{k}</code> — {v}" for k, v in PERMISSIONS.items())
-        await message.reply(
+        await clean_reply(message,
             f"❌ Укажите ID и право.\nФормат: <code>/setperm user_id право</code>\n\n"
             f"Доступные права:\n{perms_list}"
         )
@@ -1135,12 +1178,12 @@ async def cmd_set_perm(message: Message):
         user_id = int(parts[1])
         permission = parts[2]
     except (ValueError, IndexError):
-        await message.reply("❌ Некорректный формат!")
+        await clean_reply(message, "❌ Некорректный формат!")
         return
 
     if permission not in PERMISSIONS:
-        await message.reply(f"❌ Неизвестное право <code>{permission}</code>!\n"
-                            f"Доступные: {', '.join(PERMISSIONS.keys())}")
+        await clean_reply(message, f"❌ Неизвестное право <code>{permission}</code>!\n"
+                                   f"Доступные: {', '.join(PERMISSIONS.keys())}")
         return
 
     conn = await get_db()
@@ -1153,25 +1196,25 @@ async def cmd_set_perm(message: Message):
     finally:
         await conn.close()
 
-    await message.reply(f"✅ Право <code>{permission}</code> выдано пользователю {user_id}.")
+    await clean_reply(message, f"✅ Право <code>{permission}</code> выдано пользователю <code>{user_id}</code>.")
 
 
 @router.message(Command("removeperm"))
 async def cmd_remove_perm(message: Message):
     if not is_owner(message.from_user.id):
-        await message.reply("❌ Только владелец может отзывать права!")
+        await clean_reply(message, "❌ Только владелец может отзывать права!")
         return
 
     parts = message.text.split()
     if len(parts) < 3:
-        await message.reply("❌ Укажите ID и право.\nФормат: <code>/removeperm user_id право</code>")
+        await clean_reply(message, "❌ Укажите ID и право.\nФормат: <code>/removeperm user_id право</code>")
         return
 
     try:
         user_id = int(parts[1])
         permission = parts[2]
     except (ValueError, IndexError):
-        await message.reply("❌ Некорректный формат!")
+        await clean_reply(message, "❌ Некорректный формат!")
         return
 
     conn = await get_db()
@@ -1184,14 +1227,14 @@ async def cmd_remove_perm(message: Message):
     finally:
         await conn.close()
 
-    await message.reply(f"✅ Право <code>{permission}</code> отозвано у пользователя {user_id}.")
+    await clean_reply(message, f"✅ Право <code>{permission}</code> отозвано у пользователя <code>{user_id}</code>.")
 
 
 @router.message(Command("perms"))
 async def cmd_show_perms(message: Message):
     uid = message.from_user.id
     if not await is_casino_admin(uid) and not is_owner(uid):
-        await message.reply("❌ Доступ запрещён!")
+        await clean_reply(message, "❌ Доступ запрещён!")
         return
 
     parts = message.text.split()
@@ -1200,7 +1243,7 @@ async def cmd_show_perms(message: Message):
         try:
             target_id = int(parts[1])
         except ValueError:
-            await message.reply("❌ Некорректный ID!")
+            await clean_reply(message, "❌ Некорректный ID!")
             return
 
     perms = await get_admin_perms(target_id)
@@ -1211,7 +1254,7 @@ async def cmd_show_perms(message: Message):
     else:
         text = f"👤 <code>{target_id}</code>\n🔑 Нет прав."
 
-    await message.answer(text)
+    await clean_reply(message, text)
 
 
 # ─── Extra Admin Commands ────────────────────────────────────────────
@@ -1221,19 +1264,19 @@ async def cmd_show_perms(message: Message):
 async def cmd_set_balance(message: Message):
     uid = message.from_user.id
     if not await has_perm(uid, "add_balance"):
-        await message.reply("❌ Доступ запрещён!")
+        await clean_reply(message, "❌ Доступ запрещён!")
         return
 
     parts = message.text.split()
     if len(parts) < 3:
-        await message.reply("❌ Формат: <code>/setbalance user_id сумма</code>")
+        await clean_reply(message, "❌ Формат: <code>/setbalance user_id сумма</code>")
         return
 
     try:
         target_id = int(parts[1])
         amount = int(parts[2])
     except ValueError:
-        await message.reply("❌ Некорректные ID или сумма!")
+        await clean_reply(message, "❌ Некорректные ID или сумма!")
         return
 
     conn = await get_db()
@@ -1243,19 +1286,19 @@ async def cmd_set_balance(message: Message):
     finally:
         await conn.close()
 
-    await message.reply(f"✅ Баланс пользователя {target_id} установлен на {amount} монет.")
+    await clean_reply(message, f"✅ Баланс пользователя <code>{target_id}</code> установлен на <b>{amount}</b> монет.")
 
 
 @router.message(Command("broadcast"))
 async def cmd_broadcast(message: Message):
     uid = message.from_user.id
     if not is_owner(uid):
-        await message.reply("❌ Только владелец может делать рассылку!")
+        await clean_reply(message, "❌ Только владелец может делать рассылку!")
         return
 
     text = message.text.removeprefix("/broadcast").strip()
     if not text:
-        await message.reply("❌ Напишите сообщение для рассылки.\nФормат: <code>/broadcast текст</code>")
+        await clean_reply(message, "❌ Напишите сообщение для рассылки.\nФормат: <code>/broadcast текст</code>")
         return
 
     conn = await get_db()
@@ -1275,7 +1318,7 @@ async def cmd_broadcast(message: Message):
             failed += 1
         await asyncio.sleep(0.05)
 
-    await message.reply(f"✅ Рассылка завершена.\nОтправлено: {sent}\nОшибок: {failed}")
+    await clean_reply(message, f"✅ Рассылка завершена.\nОтправлено: <b>{sent}</b>\nОшибок: <b>{failed}</b>")
 
 
 # ─── Cancel game / leave all games ──────────────────────────────────
@@ -1351,6 +1394,7 @@ async def create_game_for_user(
     user_id: int,
     game_type: str,
     bet: int,
+    edit_target: Optional[Message] = None,
 ) -> bool:
     try:
         async with active_games_lock:
@@ -1391,9 +1435,20 @@ async def create_game_for_user(
             f"Игрок 1: {player1_name}\n"
             f"Места: 1/2"
         )
-        sent = await target_msg.answer(group_msg, reply_markup=game_keyboard(room_id, user_id))
-        game.chat_id = target_msg.chat.id
-        game.message_id = sent.message_id
+        if edit_target:
+            try:
+                sent = await edit_target.edit_text(group_msg, reply_markup=game_keyboard(room_id, user_id))
+                game.chat_id = edit_target.chat.id
+                game.message_id = sent.message_id
+                logger.info(f"create_game: отредактировано сообщение {edit_target.message_id}")
+            except Exception:
+                sent = await target_msg.answer(group_msg, reply_markup=game_keyboard(room_id, user_id))
+                game.chat_id = target_msg.chat.id
+                game.message_id = sent.message_id
+        else:
+            sent = await target_msg.answer(group_msg, reply_markup=game_keyboard(room_id, user_id))
+            game.chat_id = target_msg.chat.id
+            game.message_id = sent.message_id
         asyncio.ensure_future(game_timeout(room_id, GAMES_CONFIG[game_type]["timeout"]))
         logger.info(f"Создана игра: room_id={room_id}, game_type={game_type}, player1={user_id}")
         return True
@@ -1469,7 +1524,7 @@ async def cb_casino_bet_select(call: CallbackQuery, state: FSMContext):
         return
 
     await call.answer()
-    await create_game_for_user(call.message, call.from_user, call.from_user.id, game_type, bet)
+    await create_game_for_user(call.message, call.from_user, call.from_user.id, game_type, bet, edit_target=call.message)
 
 
 @router.message(GameStates.waiting_for_bet)

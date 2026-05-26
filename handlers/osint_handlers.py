@@ -4,6 +4,7 @@ from aiogram.types import Message, CallbackQuery
 from utils.keyboards import main_kb, osint_menu_kb
 from db import log_osint_query
 from osint import phone_lookup, email_lookup, username_lookup, ip_lookup, domain_lookup, check_messenger
+from leak import leak_search
 
 router = Router()
 osint_waiting: dict[int, str] = {}
@@ -31,6 +32,15 @@ def _fmt_phone(data: dict) -> str:
             lines.append(f"┣ [WhatsApp]({mg['whatsapp']})")
         if mg.get("viber"):
             lines.append(f"┣ [Viber]({mg['viber']})")
+    leak = data.get("leak")
+    if leak and leak.get("found"):
+        lines.append(f"\n🔓 *Утечки данных:*")
+        for src in leak.get("details", []):
+            lines.append(f"┣ {src['source']}: найдено {src.get('count', '?')} записей")
+            if src.get("sample"):
+                for s in src["sample"][:3]:
+                    clean = str(s)[:80]
+                    lines.append(f"┃ `{clean}`")
     return "\n".join(lines)
 
 
@@ -55,6 +65,17 @@ def _fmt_email(data: dict) -> str:
         rep = er.get("reputation", "unknown")
         susp = "⚠️ Подозрительный" if er.get("suspicious") else "✅ Нормальный"
         lines.append(f"┣ Репутация: {rep} {susp}")
+    leak = data.get("leak")
+    if leak and leak.get("found"):
+        lines.append(f"\n🔓 *Утечки данных:*")
+        for src in leak.get("details", []):
+            breaches = src.get("breaches", [])
+            if breaches:
+                lines.append(f"┣ {src['source']}:")
+                for b in breaches[:5]:
+                    lines.append(f"┃ 🔴 {b}")
+            else:
+                lines.append(f"┣ {src['source']}: данные найдены")
     return "\n".join(lines)
 
 
@@ -127,10 +148,13 @@ async def _execute_lookup(message: Message, mode: str, query: str):
             log_osint_query(uid, "phone", query)
             if "error" not in result and result.get("e164"):
                 result["messengers"] = await check_messenger(result["e164"])
+                result["leak"] = await leak_search(result["e164"], "phone")
             formatted = _fmt_phone(result)
         elif mode == "email":
             result = await email_lookup(query)
             log_osint_query(uid, "email", query)
+            if "error" not in result:
+                result["leak"] = await leak_search(query, "email")
             formatted = _fmt_email(result)
         elif mode == "username":
             result = await username_lookup(query)
