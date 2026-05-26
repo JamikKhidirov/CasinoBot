@@ -122,6 +122,15 @@ async def init_db():
         pass
     finally:
         await conn2.close()
+    # clean up stale pending deposit requests
+    conn3 = await get_db()
+    try:
+        await conn3.execute("DELETE FROM deposit_requests WHERE status = 'pending' OR status = 'payment_sent'")
+        await conn3.commit()
+    except:
+        pass
+    finally:
+        await conn3.close()
 
 
 async def get_user(user_id: int) -> Optional[aiosqlite.Row]:

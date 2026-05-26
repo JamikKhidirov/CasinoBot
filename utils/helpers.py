@@ -1,6 +1,7 @@
 import datetime
 from typing import Optional
 import db
+from config import OWNER_ID
 
 def get_username_safe(user_id: int) -> str:
     try:
@@ -10,6 +11,8 @@ def get_username_safe(user_id: int) -> str:
     except: return "unknown"
 
 def is_admin(user_id: int) -> bool:
+    if user_id == OWNER_ID:
+        return True
     try:
         db.cur.execute("SELECT is_admin FROM users WHERE user_id = ?", (user_id,))
         row = db.cur.fetchone()

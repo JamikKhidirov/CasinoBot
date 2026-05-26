@@ -144,14 +144,17 @@ def _fmt_domain(data: dict) -> str:
 
 async def _execute_lookup(message: Message, mode: str, query: str):
     """Выполняет OSINT-поиск и отправляет результат."""
-    await message.answer("⏳ Выполняю поиск...")
     uid = message.from_user.id
+    if not is_admin(uid):
+        await message.answer("❌ OSINT доступен только администраторам.")
+        return
+
+    await message.answer("⏳ Выполняю поиск...")
     try:
         if mode == "phone":
             result = phone_lookup(query)
             log_osint_query(uid, "phone", query)
             if "error" not in result and result.get("e164"):
-                result["messengers"] = await check_messenger(result["e164"])
                 result["leak"] = await leak_search(result["e164"], "phone")
             formatted = _fmt_phone(result)
         elif mode == "email":
@@ -187,10 +190,14 @@ async def _execute_lookup(message: Message, mode: str, query: str):
 def _cmd_shortcut(mode: str, prompt: str, example: str):
     """Создаёт обработчик для /команда [аргументы]."""
     async def handler(message: Message, command: CommandObject):
+        uid = message.from_user.id
+        if not is_admin(uid):
+            await message.answer("❌ OSINT доступен только администраторам.")
+            return
         if command.args:
             await _execute_lookup(message, mode, command.args)
         else:
-            osint_waiting[message.from_user.id] = mode
+            osint_waiting[uid] = (mode, message.chat.id, message.message_id)
             await message.answer(f"{prompt}\nПример: `{example}`", parse_mode="Markdown")
     return handler
 
