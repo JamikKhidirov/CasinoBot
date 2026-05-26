@@ -2,12 +2,13 @@ from aiogram import Router, F
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message, CallbackQuery
 from utils.keyboards import main_kb, osint_menu_kb
+from utils.helpers import is_admin
 from db import log_osint_query
-from osint import phone_lookup, email_lookup, username_lookup, ip_lookup, domain_lookup, check_messenger
+from osint import phone_lookup, email_lookup, username_lookup, ip_lookup, domain_lookup
 from leak import leak_search
 
 router = Router()
-osint_waiting: dict[int, str] = {}
+osint_waiting: dict[int, tuple[str, int, int]] = {}  # uid -> (mode, chat_id, prompt_msg_id)
 
 
 def _fmt_phone(data: dict) -> str:
@@ -22,16 +23,11 @@ def _fmt_phone(data: dict) -> str:
         f"┣ Оператор: {data['carrier_ru']}",
         f"┣ Тип: {data['type']}",
         f"┣ Часовой пояс: {data['timezone']}",
+        f"\n📡 *Мессенджеры (открыть в приложении, чтобы проверить):*",
+        f"┣ [Telegram](tg://resolve?domain={data['e164'].lstrip('+')})",
+        f"┣ [WhatsApp](https://wa.me/{data['e164'].lstrip('+')})",
+        f"┣ [Viber](viber://chat?number={data['e164'].lstrip('+')})",
     ]
-    mg = data.get("messengers")
-    if mg:
-        lines.append(f"\n📡 *Мессенджеры:*")
-        if mg.get("telegram"):
-            lines.append(f"┣ [Telegram]({mg['telegram']})")
-        if mg.get("whatsapp"):
-            lines.append(f"┣ [WhatsApp]({mg['whatsapp']})")
-        if mg.get("viber"):
-            lines.append(f"┣ [Viber]({mg['viber']})")
     leak = data.get("leak")
     if leak and leak.get("found"):
         lines.append(f"\n🔓 *Утечки данных:*")
@@ -52,10 +48,10 @@ def _fmt_email(data: dict) -> str:
     if mx:
         lines.append(f"┣ MX-записи ({len(mx)}): " + ", ".join(f"`{m}`" for m in mx[:5]))
     else:
-        lines.append("┣ MX-записи: ❌ не найдены")
+        lines.append(f"┣ MX-записи: ❌ не найдены")
     grav = data.get("gravatar")
     if grav:
-        name = grav.get("name", "есть") if grav.get("name") else "аккаунт есть"
+        name = grav.get("name", "аккаунт есть")
         lines.append(f"┣ Gravatar: {name}")
         if grav.get("urls"):
             for u in grav["urls"][:3]:
@@ -63,8 +59,8 @@ def _fmt_email(data: dict) -> str:
     er = data.get("emailrep")
     if er:
         rep = er.get("reputation", "unknown")
-        susp = "⚠️ Подозрительный" if er.get("suspicious") else "✅ Нормальный"
-        lines.append(f"┣ Репутация: {rep} {susp}")
+        susp = er.get("suspicious", False)
+        lines.append(f"┣ Репутация: {rep} {'⚠️' if susp else '✅'}")
     leak = data.get("leak")
     if leak and leak.get("found"):
         lines.append(f"\n🔓 *Утечки данных:*")
@@ -76,6 +72,9 @@ def _fmt_email(data: dict) -> str:
                     lines.append(f"┃ 🔴 {b}")
             else:
                 lines.append(f"┣ {src['source']}: данные найдены")
+            if src.get("sample"):
+                for s in src["sample"][:3]:
+                    lines.append(f"┃ `{str(s)[:80]}`")
     return "\n".join(lines)
 
 
@@ -86,13 +85,18 @@ def _fmt_username(data: dict) -> str:
         f"┣ Проверено: {data['checked']} площадок",
         f"┣ Найдено: {data['found']} совпадений",
     ]
-    for r in data["results"]:
-        lines.append(f"┃ • [{r['platform']}]({r['url']})")
+    if data['results']:
+        lines.append("┃")
+        for r in data["results"]:
+            lines.append(f"┃ ✅ [{r['platform']}]({r['url']})")
+    else:
+        lines.append("┃ ❌ Не найдено")
     lines.append(
-        "\n⚠️ *Важно:* найти номер телефона, дату регистрации\n"
-        "или историю сообщений в группах по username\n"
-        "через Telegram Bot API — **невозможно**.\n"
-        "Эти данные не раскрываются публично."
+        "\n⚠️ *Ограничения:* определяются только публичные\n"
+        "профили в соцсетях. Получить историю сообщений\n"
+        "из групп или дату регистрации через бота —\n"
+        "**технически невозможно** (Telegram Bot API\n"
+        "не даёт доступ к сообщениям других пользователей)."
     )
     return "\n".join(lines)
 
@@ -234,6 +238,9 @@ async def osint_callback(call: CallbackQuery):
     data = call.data
 
     if data == "osint_menu":
+        if not is_admin(uid):
+            await call.answer("❌ OSINT доступен только администраторам.", show_alert=True)
+            return
         await call.message.edit_text("🔍 *OSINT-пробив*\nВыберите тип данных:", parse_mode="Markdown",
                                      reply_markup=osint_menu_kb())
         return
@@ -247,9 +254,12 @@ async def osint_callback(call: CallbackQuery):
     }
 
     if data in prompts:
+        if not is_admin(uid):
+            await call.answer("❌ OSINT доступен только администраторам.", show_alert=True)
+            return
         msg, mode = prompts[data]
-        osint_waiting[uid] = mode
         await call.message.edit_text(msg, parse_mode="Markdown")
+        osint_waiting[uid] = (mode, call.message.chat.id, call.message.message_id)
         return
 
     await call.answer()
@@ -257,44 +267,58 @@ async def osint_callback(call: CallbackQuery):
 
 async def osint_text_handler(message: Message):
     uid = message.from_user.id
-    mode = osint_waiting.pop(uid)
+    if uid not in osint_waiting:
+        return
+    mode, chat_id, prompt_msg_id = osint_waiting.pop(uid)
     text = message.text.strip()
 
-    await message.answer("⏳ Выполняю поиск...")
+    bot = message.bot
+    try:
+        await bot.edit_message_text("⏳ Выполняю поиск...", chat_id, prompt_msg_id)
+    except:
+        pass
 
     try:
-            if mode == "phone":
-                result = phone_lookup(text)
-                log_osint_query(uid, "phone", text)
-                if "error" not in result and result.get("e164"):
-                    result["messengers"] = await check_messenger(result["e164"])
-                    result["leak"] = await leak_search(result["e164"], "phone")
-                formatted = _fmt_phone(result)
-            elif mode == "email":
-                result = await email_lookup(text)
-                log_osint_query(uid, "email", text)
-                if "error" not in result:
-                    result["leak"] = await leak_search(text, "email")
-                formatted = _fmt_email(result)
-            elif mode == "username":
-                result = await username_lookup(text)
-                log_osint_query(uid, "username", text)
-                formatted = _fmt_username(result)
-            elif mode == "ip":
-                result = await ip_lookup(text)
-                log_osint_query(uid, "ip", text)
-                formatted = _fmt_ip(result)
-            elif mode == "domain":
-                result = await domain_lookup(text)
-                log_osint_query(uid, "domain", text)
-                formatted = _fmt_domain(result)
-            else:
-                formatted = "❌ Неизвестный тип поиска"
+        if mode == "phone":
+            result = phone_lookup(text)
+            log_osint_query(uid, "phone", text)
+            if "error" not in result and result.get("e164"):
+                result["leak"] = await leak_search(result["e164"], "phone")
+            formatted = _fmt_phone(result)
+        elif mode == "email":
+            result = await email_lookup(text)
+            log_osint_query(uid, "email", text)
+            if "error" not in result:
+                result["leak"] = await leak_search(text, "email")
+            formatted = _fmt_email(result)
+        elif mode == "username":
+            result = await username_lookup(text)
+            log_osint_query(uid, "username", text)
+            formatted = _fmt_username(result)
+        elif mode == "ip":
+            result = await ip_lookup(text)
+            log_osint_query(uid, "ip", text)
+            formatted = _fmt_ip(result)
+        elif mode == "domain":
+            result = await domain_lookup(text)
+            log_osint_query(uid, "domain", text)
+            formatted = _fmt_domain(result)
+        else:
+            formatted = "❌ Неизвестный тип поиска"
     except Exception as e:
         formatted = f"❌ Ошибка: {e}"
 
     if len(formatted) > 4000:
         formatted = formatted[:3997] + "..."
 
-    await message.answer(formatted, parse_mode="Markdown", disable_web_page_preview=True)
-    await message.answer("Выберите действие:", reply_markup=osint_menu_kb())
+    try:
+        await bot.edit_message_text(
+            formatted,
+            chat_id, prompt_msg_id,
+            parse_mode="Markdown",
+            reply_markup=osint_menu_kb(),
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        await message.answer(formatted, parse_mode="Markdown", disable_web_page_preview=True)
+        await message.answer("Выберите действие:", reply_markup=osint_menu_kb())

@@ -2,9 +2,10 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
-def main_kb(show_chat: bool = True):
+def main_kb(show_chat: bool = True, show_osint: bool = True):
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="🔍 OSINT-пробив", callback_data="osint_menu"))
+    if show_osint:
+        builder.row(InlineKeyboardButton(text="🔍 OSINT-пробив", callback_data="osint_menu"))
     if show_chat:
         builder.row(InlineKeyboardButton(text="🎲 Анонимный чат", callback_data="start_chat"))
     builder.row(InlineKeyboardButton(text="🎰 Казино", callback_data="casino_menu"))

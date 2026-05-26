@@ -49,6 +49,9 @@ GAMES_CONFIG = {
 class DepositState(StatesGroup):
     waiting_for_amount = State()
 
+class PaymentProvideState(StatesGroup):
+    waiting_for_details = State()
+
 
 class GameStates(StatesGroup):
     waiting_for_bet = State()
@@ -92,7 +95,8 @@ async def init_db():
                 user_id INTEGER,
                 amount INTEGER,
                 status TEXT DEFAULT 'pending',
-                created TEXT
+                created TEXT,
+                payment_details TEXT
             );
             CREATE TABLE IF NOT EXISTS casino_admins (
                 admin_id INTEGER PRIMARY KEY,
@@ -109,6 +113,15 @@ async def init_db():
         await conn.commit()
     finally:
         await conn.close()
+    # migration: add payment_details for existing DBs
+    conn2 = await get_db()
+    try:
+        await conn2.execute("ALTER TABLE deposit_requests ADD COLUMN payment_details TEXT")
+        await conn2.commit()
+    except:
+        pass
+    finally:
+        await conn2.close()
 
 
 async def get_user(user_id: int) -> Optional[aiosqlite.Row]:
@@ -270,7 +283,7 @@ async def cb_casino_menu(call: CallbackQuery):
     if not user:
         await create_user(call.from_user)
         user = await get_user(call.from_user.id)
-    await call.message.answer(
+    await call.message.edit_text(
         f"🎰 <b>Меню казино</b>\n\n"
         f"💰 Ваш баланс: {user['balance']} монет\n"
         f"🏆 Побед: {user['wins']} / {user['games_played']} игр",
@@ -471,60 +484,91 @@ async def cb_deposit(call: CallbackQuery, state: FSMContext):
         )
         return
 
-    await call.message.answer("Введите сумму пополнения (от 100 до 10000 монет):")
-    await state.set_state(DepositState.waiting_for_amount)
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="100 🪙", callback_data="deposit_100"),
+         InlineKeyboardButton(text="500 🪙", callback_data="deposit_500"),
+         InlineKeyboardButton(text="1000 🪙", callback_data="deposit_1000")],
+        [InlineKeyboardButton(text="5000 🪙", callback_data="deposit_5000"),
+         InlineKeyboardButton(text="✏️ Другая", callback_data="deposit_custom")],
+    ])
+    await call.message.edit_text("💳 <b>Пополнение баланса</b>\n\nВыберите сумму:", parse_mode="HTML", reply_markup=markup)
     await call.answer()
+
+
+@router.callback_query(F.data.startswith("deposit_"))
+async def cb_deposit_preset(call: CallbackQuery, state: FSMContext):
+    amount_str = call.data.split("_", 1)[1]
+    if amount_str == "custom":
+        await call.message.edit_text("💰 Введите сумму пополнения (от 100 до 10000 монет):")
+        await state.set_state(DepositState.waiting_for_amount)
+        await call.answer()
+        return
+
+    try:
+        amount = int(amount_str)
+    except ValueError:
+        await call.answer("❌ Некорректная сумма!", show_alert=True)
+        return
+
+    await _submit_deposit_request(call.from_user.id, amount, call.message)
+    await call.answer()
+
+
+async def _submit_deposit_request(user_id: int, amount: int, msg: Message):
+    if not (100 <= amount <= 10000):
+        await msg.edit_text("❌ Сумма должна быть от 100 до 10000 монет.")
+        return
+    conn = await get_db()
+    deposit_id = None
+    try:
+        cursor = await conn.execute(
+            "SELECT id FROM deposit_requests WHERE user_id = ? AND status = 'pending'",
+            (user_id,),
+        )
+        existing = await cursor.fetchone()
+        if existing:
+            await msg.edit_text("❌ У вас уже есть активный запрос на пополнение!")
+            return
+        cursor = await conn.execute(
+            "INSERT INTO deposit_requests (user_id, amount, created) VALUES (?, ?, ?)",
+            (user_id, amount, datetime.now().isoformat()),
+        )
+        await conn.commit()
+        deposit_id = cursor.lastrowid
+    finally:
+        await conn.close()
+    if deposit_id:
+        await send_admin_notification(user_id, amount, deposit_id)
+        await msg.edit_text(f"✅ Запрос на <b>{amount}</b> монет отправлен администратору.\nОжидайте реквизитов для оплаты.", parse_mode="HTML")
+    else:
+        await msg.edit_text("❌ Ошибка при создании запроса.")
 
 
 @router.message(DepositState.waiting_for_amount)
 async def process_deposit_amount(message: Message, state: FSMContext):
     try:
-        amount = int(message.text)
-        if not (100 <= amount <= 10000):
-            raise ValueError
+        amount = int(message.text.strip())
     except (ValueError, TypeError):
-        await message.answer("❌ Некорректная сумма! Используйте целое число от 100 до 10000.")
-        await state.clear()
+        await message.answer("❌ Введите целое число от 100 до 10000.")
         return
-
-    conn = await get_db()
-    try:
-        cursor = await conn.execute(
-            "SELECT * FROM deposit_requests WHERE user_id = ? AND status = 'pending'",
-            (message.from_user.id,),
-        )
-        if await cursor.fetchone():
-            await message.answer("❌ У вас уже есть активный запрос на пополнение!")
-            await state.clear()
-            return
-
-        await conn.execute(
-            "INSERT INTO deposit_requests (user_id, amount, created) VALUES (?, ?, ?)",
-            (message.from_user.id, amount, datetime.now().isoformat()),
-        )
-        await conn.commit()
-    finally:
-        await conn.close()
-
-    await send_admin_notification(message.from_user.id, amount)
-    await message.answer("✅ Запрос отправлен администратору. Ожидайте подтверждения.")
     await state.clear()
+    await _submit_deposit_request(message.from_user.id, amount, message)
 
 
-async def send_admin_notification(user_id: int, amount: int):
+async def send_admin_notification(user_id: int, amount: int, deposit_id: int):
     try:
         markup = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
-                    InlineKeyboardButton("✅ Одобрить", callback_data=f"approve_{user_id}_{amount}"),
-                    InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{user_id}_{amount}"),
+                    InlineKeyboardButton("💳 Отправить реквизиты", callback_data=f"provide_{deposit_id}"),
+                    InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{deposit_id}"),
                 ]
             ]
         )
         username = await get_username(user_id)
         await get_bot().send_message(
             ADMIN_ID,
-            f"🆕 Запрос на пополнение:\n\n"
+            f"🆕 Запрос на пополнение\n\n"
             f"👤 Пользователь: {username}\n"
             f"🆔 ID: {user_id}\n"
             f"💵 Сумма: {amount} монет",
@@ -534,38 +578,205 @@ async def send_admin_notification(user_id: int, amount: int):
         logger.error(f"Ошибка при отправке уведомления админу: {e}")
 
 
-@router.callback_query(F.data.startswith("approve_") | F.data.startswith("reject_"))
-async def cb_admin_decision(call: CallbackQuery):
+@router.callback_query(F.data.startswith("provide_"))
+async def cb_provide_details(call: CallbackQuery, state: FSMContext):
     if not await has_perm(call.from_user.id, "approve_deposits"):
         await call.answer("❌ Доступ запрещён!", show_alert=True)
         return
 
-    action, user_id_str, amount_str = call.data.split("_")
-    user_id = int(user_id_str)
-    amount = int(amount_str)
+    deposit_id = int(call.data.split("_", 1)[1])
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT user_id, amount FROM deposit_requests WHERE id = ? AND status = 'pending'",
+            (deposit_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            await call.answer("❌ Запрос уже обработан.", show_alert=True)
+            return
+    finally:
+        await conn.close()
+
+    await state.set_state(PaymentProvideState.waiting_for_details)
+    await state.update_data(deposit_id=deposit_id, user_id=row["user_id"], amount=row["amount"])
+    await call.message.edit_text(
+        f"💳 Введите реквизиты для оплаты (одним сообщением):\n\n"
+        f"Пример:\n"
+        f"Номер карты: 1234 5678 9012 3456\n"
+        f"Банк: СберБанк\n"
+        f"Тип: MasterCard\n"
+        f"Получатель: Иван И.",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton("❌ Отмена", callback_data="cancel_provide")]
+        ])
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "cancel_provide")
+async def cb_cancel_provide(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await call.message.edit_text("❌ Ввод реквизитов отменён.")
+    await call.answer()
+
+
+@router.message(PaymentProvideState.waiting_for_details)
+async def process_payment_details(message: Message, state: FSMContext):
+    data = await state.get_data()
+    deposit_id = data["deposit_id"]
+    user_id = data["user_id"]
+    amount = data["amount"]
+    details = message.text.strip()
+
+    if len(details) > 500:
+        await message.answer("❌ Слишком много текста. Максимум 500 символов.")
+        return
 
     conn = await get_db()
     try:
-        if action == "approve":
-            await update_balance(user_id, amount, "deposit")
-            status = "approved"
-            await get_bot().send_message(user_id, f"✅ Ваш баланс пополнен на {amount} монет!")
-        else:
-            status = "rejected"
-            await get_bot().send_message(user_id, "❌ Ваш запрос на пополнение был отклонён.")
-
         await conn.execute(
-            "UPDATE deposit_requests SET status = ? WHERE user_id = ? AND amount = ? AND status = 'pending'",
-            (status, user_id, amount),
+            "UPDATE deposit_requests SET payment_details = ?, status = 'payment_sent' WHERE id = ? AND status = 'pending'",
+            (details, deposit_id),
         )
         await conn.commit()
     finally:
         await conn.close()
 
-    await call.answer(f"Статус обновлён: {status}")
+    await state.clear()
+
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton("✅ Я оплатил", callback_data=f"paid_{deposit_id}"),
+         InlineKeyboardButton("❌ Отмена", callback_data=f"reject_{deposit_id}")]
+    ])
+    await get_bot().send_message(
+        user_id,
+        f"💰 Пополнение на <b>{amount}</b> монет\n\n"
+        f"📋 <b>Реквизиты для оплаты:</b>\n{details}\n\n"
+        f"После перевода нажмите «Я оплатил».",
+        parse_mode="HTML",
+        reply_markup=markup,
+    )
+
+    await message.answer(f"✅ Реквизиты отправлены пользователю (ID: {user_id}).")
+    try:
+        await get_bot().delete_message(message.chat.id, message.message_id)
+    except:
+        pass
+
+
+@router.callback_query(F.data.startswith("paid_"))
+async def cb_user_paid(call: CallbackQuery):
+    deposit_id = int(call.data.split("_", 1)[1])
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT user_id, amount FROM deposit_requests WHERE id = ? AND status = 'payment_sent'",
+            (deposit_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            await call.answer("❌ Запрос уже обработан.", show_alert=True)
+            return
+
+        await conn.execute(
+            "UPDATE deposit_requests SET status = 'paid' WHERE id = ?",
+            (deposit_id,),
+        )
+        await conn.commit()
+    finally:
+        await conn.close()
+
+    approve_markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton("✅ Подтвердить", callback_data=f"approve_{deposit_id}"),
+         InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{deposit_id}")]
+    ])
+    username = await get_username(row["user_id"])
+    await get_bot().send_message(
+        ADMIN_ID,
+        f"👤 Пользователь: {username}\n"
+        f"🆔 ID: {row['user_id']}\n"
+        f"💵 Сумма: {row['amount']} монет\n\n"
+        f"✅ Пользователь подтвердил оплату.\n"
+        f"Проверьте свой счёт и подтвердите.",
+        reply_markup=approve_markup,
+    )
+
+    await call.message.edit_text("✅ Оплата подтверждена. Ожидайте проверки администратором.")
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("approve_"))
+async def cb_approve(call: CallbackQuery):
+    if not await has_perm(call.from_user.id, "approve_deposits"):
+        await call.answer("❌ Доступ запрещён!", show_alert=True)
+        return
+
+    deposit_id = int(call.data.split("_", 1)[1])
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT user_id, amount FROM deposit_requests WHERE id = ? AND status = 'paid'",
+            (deposit_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            await call.answer("❌ Запрос уже обработан.", show_alert=True)
+            return
+
+        user_id = row["user_id"]
+        amount = row["amount"]
+        await update_balance(user_id, amount, "deposit")
+        await conn.execute(
+            "UPDATE deposit_requests SET status = 'approved' WHERE id = ?",
+            (deposit_id,),
+        )
+        await conn.commit()
+
+        await get_bot().send_message(user_id, f"✅ Ваш баланс пополнен на {amount} монет!")
+    finally:
+        await conn.close()
+
+    await call.answer("✅ Подтверждено!")
     try:
         await get_bot().delete_message(call.message.chat.id, call.message.message_id)
-    except Exception:
+    except:
+        pass
+
+
+@router.callback_query(F.data.startswith("reject_"))
+async def cb_reject(call: CallbackQuery):
+    if not await has_perm(call.from_user.id, "approve_deposits"):
+        await call.answer("❌ Доступ запрещён!", show_alert=True)
+        return
+
+    deposit_id = int(call.data.split("_", 1)[1])
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT user_id, amount, status FROM deposit_requests WHERE id = ?",
+            (deposit_id,),
+        )
+        row = await cursor.fetchone()
+        if not row or row["status"] in ("approved", "rejected"):
+            await call.answer("❌ Запрос уже обработан.", show_alert=True)
+            return
+
+        await conn.execute(
+            "UPDATE deposit_requests SET status = 'rejected' WHERE id = ?",
+            (deposit_id,),
+        )
+        await conn.commit()
+
+        await get_bot().send_message(row["user_id"], "❌ Ваш запрос на пополнение был отклонён.")
+    finally:
+        await conn.close()
+
+    await call.answer("❌ Отклонено")
+    try:
+        await get_bot().delete_message(call.message.chat.id, call.message.message_id)
+    except:
         pass
 
 
@@ -1686,7 +1897,8 @@ async def cb_roll_dice(call: CallbackQuery):
         except Exception:
             pass
 
-        roll_msg = await get_bot().send_message(game.chat_id, f"{player_name} бросает {config['emoji']}...")
+        emoji_name = "⚽ пенальти" if config["emoji"] == "⚽" else config["emoji"]
+        roll_msg = await get_bot().send_message(game.chat_id, f"{player_name} забивает {emoji_name}...")
         game.last_roll_message_id = roll_msg.message_id
 
         dice_msg = await get_bot().send_dice(game.chat_id, emoji=config["emoji"], disable_notification=True)
@@ -1726,7 +1938,8 @@ async def process_dice_roll(game: GameRoom, player_id: int, dice_value: int):
     except Exception:
         pass
 
-    wait_msg = await get_bot().send_message(game.chat_id, f"⏳ {player_name} бросил {config['emoji']}, ожидаем результат...")
+    emoji_label = "⚽ пенальти" if config["emoji"] == "⚽" else config["emoji"]
+    wait_msg = await get_bot().send_message(game.chat_id, f"⏳ {player_name} забивает {emoji_label}, ожидаем результат...")
     game.last_roll_message_id = wait_msg.message_id
 
     async def show_result():
@@ -1738,7 +1951,7 @@ async def process_dice_roll(game: GameRoom, player_id: int, dice_value: int):
                 pass
 
             result_msg = await get_bot().send_message(
-                game.chat_id, f"{player_name} выбросил {dice_value} {config['emoji']}!"
+                game.chat_id, f"{player_name} выбросил {dice_value} {config['emoji']}!" if config["emoji"] != "⚽" else f"{player_name} забивает: {dice_value} {'⚽ ГОЛ!' if dice_value > 3 else '❌ Промах!'}"
             )
             game.last_roll_message_id = result_msg.message_id
 
@@ -1807,8 +2020,8 @@ async def determine_winner(game: GameRoom):
                 final = "⏰ Игра отменена — никто не присоединился."
         else:
             if game.game_type == "футбол":
-                p1_score_goal = p1_score == 5
-                p2_score_goal = p2_score == 5
+                p1_score_goal = p1_score > 3
+                p2_score_goal = p2_score > 3
                 if p1_score_goal and p2_score_goal:
                     await update_balance(game.player1, game.bet, "refund")
                     await update_balance(game.player2, game.bet, "refund")
@@ -1887,6 +2100,8 @@ async def determine_winner(game: GameRoom):
                         (loser,),
                     )
                     await conn.commit()
+                except:
+                    pass
                 finally:
                     await conn.close()
 
