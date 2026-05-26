@@ -4,14 +4,16 @@ from aiogram.types import Message, CallbackQuery
 from utils.keyboards import main_kb, osint_menu_kb
 from config import OWNER_ID
 from db import log_osint_query
-from osint import phone_lookup, email_lookup, username_lookup, ip_lookup, domain_lookup, phone_messenger_check, telegram_profile
+from osint import (phone_lookup, email_lookup, username_lookup, ip_lookup,
+                   domain_lookup, phone_messenger_check, phone_services_lookup,
+                   telegram_profile, telegram_profile_extended, telegram_deep_search)
 from leak import leak_search
 
 router = Router()
 osint_waiting: dict[int, tuple[str, int, int]] = {}  # uid -> (mode, chat_id, prompt_msg_id)
 
 
-def _fmt_phone(data: dict) -> str:
+def _fmt_phone(data: dict, full: bool = False) -> str:
     if "error" in data:
         return f"❌ {data['error']}"
     lines = [
@@ -24,8 +26,14 @@ def _fmt_phone(data: dict) -> str:
         f"┃ Тип: {data['type']}",
         f"┃ Часовой пояс: {data['timezone']}",
     ]
-    if data.get("services"):
-        lines.append(f"┃ Сервисы: {', '.join(data['services'])}")
+    accounts = data.get("accounts")
+    if accounts and accounts.get("found_services"):
+        lines.append("")
+        lines.append("<b>👤 Привязанные аккаунты:</b>")
+        for svc in accounts["found_services"]:
+            emoji = {"WhatsApp": "💬", "Viber": "💬", "Signal": "🔒", "Telegram": "✈️",
+                     "VK": "📘", "Facebook": "📘", "Truecaller": "📞", "GetContact": "📞"}
+            lines.append(f"┃ {emoji.get(svc, '📱')} {svc}")
     messengers = data.get("messengers")
     if messengers:
         lines.append("")
@@ -74,12 +82,15 @@ def _fmt_email(data: dict) -> str:
 
 
 def _fmt_username(data: dict) -> str:
+    all_found = data.get("found", 0)
     lines = [
-        f"<b>🔎 Результат по username:</b>",
-        f"┃ Username: <code>{data['username']}</code>",
-        f"┃ Проверено: {data['checked']} площадок",
-        f"┃ Найдено: {data['found']} совпадений",
+        f"<b>🔎 Результат по username: <code>{data['username']}</code></b>",
+        f"┃ Проверено: <b>{data['checked']}</b> площадок",
+        f"┃ Найдено: <b>{all_found}</b> совпадений",
     ]
+    leaks = data.get("leak")
+    if leaks and leaks.get("found"):
+        lines.append(f"┃ 🔓 <b>Утечки:</b> {', '.join(leaks.get('sources', []))}")
     tg = data.get("telegram")
     if tg and tg.get("found"):
         lines.append("")
@@ -92,6 +103,25 @@ def _fmt_username(data: dict) -> str:
         lines.append(f"┃ 🔗 <code>{tg['url']}</code>")
         lines.append(f"┃ 🖼 Фото: {'✅ Есть' if tg.get('has_photo') else '❌ Нет'}")
         lines.append(f"┃ 📋 Тип: {tg['type']}")
+        if tg.get("subscriber_count"):
+            lines.append(f"┃ 👥 {tg['subscriber_count']}")
+        if tg.get("tgdb_info"):
+            lines.append(f"┃ 🆔 TGDB: {tg['tgdb_info'].get('name', 'найден')}")
+        if tg.get("tg_id"):
+            lines.append(f"┃ 🆔 ID: <code>{tg['tg_id']}</code>")
+        if tg.get("registration_date"):
+            lines.append(f"┃ 📅 Регистрация: {tg['registration_date']}")
+        if tg.get("tgstat"):
+            ts = tg["tgstat"]
+            if ts.get("members"):
+                lines.append(f"┃ 📊 Tgstat: {ts.get('members', '')} {ts.get('label', '')}")
+        recent = tg.get("recent_posts")
+        if recent:
+            lines.append(f"┃ 📰 Последние посты:")
+            for p in recent[:3]:
+                if isinstance(p, dict):
+                    txt = p.get("text", p.get("message", ""))[:100]
+                    lines.append(f"┃ ├ <code>{txt}</code>")
     if data['results']:
         lines.append("")
         lines.append("<b>🌐 Найден на площадках:</b>")
@@ -100,7 +130,6 @@ def _fmt_username(data: dict) -> str:
     else:
         lines.append("┃")
         lines.append("┃ ❌ Не найдено ни одного профиля")
-    return "\n".join(lines)
     return "\n".join(lines)
 
 
@@ -179,6 +208,7 @@ async def _execute_lookup(message: Message, mode: str, query: str):
                 messengers = await phone_messenger_check(result["e164"])
                 if messengers:
                     result["messengers"] = [f"{m['platform']} — <code>{m['url']}</code>" for m in messengers]
+                result["accounts"] = await phone_services_lookup(result["e164"])
             formatted = _fmt_phone(result)
         elif mode == "email":
             result = await email_lookup(query)
@@ -189,9 +219,10 @@ async def _execute_lookup(message: Message, mode: str, query: str):
         elif mode == "username":
             result = await username_lookup(query)
             log_osint_query(uid, "username", query)
-            tg = await telegram_profile(query)
+            tg = await telegram_deep_search(query)
             if tg.get("found"):
                 result["telegram"] = tg
+            result["leak"] = await leak_search(query, "username")
             formatted = _fmt_username(result)
         elif mode == "ip":
             result = await ip_lookup(query)
@@ -322,6 +353,7 @@ async def osint_text_handler(message: Message):
                 messengers = await phone_messenger_check(result["e164"])
                 if messengers:
                     result["messengers"] = [f"{m['platform']} — <code>{m['url']}</code>" for m in messengers]
+                result["accounts"] = await phone_services_lookup(result["e164"])
             formatted = _fmt_phone(result)
         elif mode == "email":
             result = await email_lookup(text)
@@ -332,9 +364,10 @@ async def osint_text_handler(message: Message):
         elif mode == "username":
             result = await username_lookup(text)
             log_osint_query(uid, "username", text)
-            tg = await telegram_profile(text)
+            tg = await telegram_profile_extended(text)
             if tg.get("found"):
                 result["telegram"] = tg
+            result["leak"] = await leak_search(text, "username")
             formatted = _fmt_username(result)
         elif mode == "ip":
             result = await ip_lookup(text)
