@@ -38,11 +38,11 @@ def setup(bot_instance: Bot):
 router = Router()
 
 GAMES_CONFIG = {
-    "куб": {"command": "куб", "emoji": "🎲", "timeout": 30},
-    "боулинг": {"command": "боулинг", "emoji": "🎳", "timeout": 30},
-    "дротики": {"command": "дротики", "emoji": "🎯", "timeout": 30},
-    "баскетбол": {"command": "баскетбол", "emoji": "🏀", "timeout": 30},
-    "футбол": {"command": "футбол", "emoji": "⚽", "timeout": 30},
+    "куб": {"command": "куб", "emoji": "🎲", "timeout": 30, "action": "бросает кубик"},
+    "боулинг": {"command": "боулинг", "emoji": "🎳", "timeout": 30, "action": "бросает шар"},
+    "дротики": {"command": "дротики", "emoji": "🎯", "timeout": 30, "action": "бросает дротик"},
+    "баскетбол": {"command": "баскетбол", "emoji": "🏀", "timeout": 30, "action": "бросает мяч"},
+    "футбол": {"command": "футбол", "emoji": "⚽", "timeout": 30, "action": "забивает пенальти"},
 }
 
 
@@ -188,6 +188,7 @@ class GameRoom:
         self.player2_button_message_id: Optional[int] = None
         self.player1_dice_message_id: Optional[int] = None
         self.player2_dice_message_id: Optional[int] = None
+        self.timer_task: Optional[asyncio.Task] = None
 
     def add_player(self, player2: int) -> bool:
         if self.player2 is None:
@@ -1664,6 +1665,7 @@ async def create_game_for_user(
             game.chat_id = target_msg.chat.id
             game.message_id = sent.message_id
         asyncio.ensure_future(game_timeout(room_id, GAMES_CONFIG[game_type]["timeout"]))
+        game.timer_task = asyncio.ensure_future(show_countdown(game, GAMES_CONFIG[game_type]["timeout"]))
         logger.info(f"Создана игра: room_id={room_id}, game_type={game_type}, player1={user_id}")
         return True
 
@@ -1897,8 +1899,7 @@ async def cb_roll_dice(call: CallbackQuery):
         except Exception:
             pass
 
-        emoji_name = "⚽ пенальти" if config["emoji"] == "⚽" else config["emoji"]
-        roll_msg = await get_bot().send_message(game.chat_id, f"{player_name} забивает {emoji_name}...")
+        roll_msg = await get_bot().send_message(game.chat_id, f"{player_name} {config['action']}...")
         game.last_roll_message_id = roll_msg.message_id
 
         dice_msg = await get_bot().send_dice(game.chat_id, emoji=config["emoji"], disable_notification=True)
@@ -1927,6 +1928,76 @@ async def cb_roll_dice(call: CallbackQuery):
         await call.answer("❌ Ошибка при броске костей!", show_alert=True)
 
 
+GAME_EMOJIS = {cfg["emoji"]: gt for gt, cfg in GAMES_CONFIG.items()}
+
+
+@router.message(F.text.in_(list(GAME_EMOJIS.keys())))
+async def handle_game_emoji(message: Message):
+    uid = message.from_user.id
+    emoji = message.text.strip()
+    game_type = GAME_EMOJIS.get(emoji)
+    if not game_type:
+        return
+
+    async with active_games_lock:
+        game = None
+        for g in active_games.values():
+            if g.is_finished:
+                continue
+            if uid in (g.player1, g.player2) and g.game_type == game_type:
+                game = g
+                break
+
+        if not game:
+            await message.answer("❌ У вас нет активной игры этого типа.")
+            return
+
+        current = game.player1 if game.player1_turn else game.player2
+        if uid != current:
+            await message.answer("❌ Сейчас не ваш ход!")
+            return
+
+        if uid in game.results:
+            await message.answer("❌ Вы уже сделали бросок!")
+            return
+
+    config = GAMES_CONFIG[game.game_type]
+    player_name = await get_username(uid)
+
+    try:
+        if game.last_roll_message_id:
+            await get_bot().delete_message(game.chat_id, game.last_roll_message_id)
+    except Exception:
+        pass
+
+    roll_msg = await get_bot().send_message(game.chat_id, f"{player_name} {config['action']}...")
+    game.last_roll_message_id = roll_msg.message_id
+
+    dice_msg = await get_bot().send_dice(game.chat_id, emoji=config["emoji"], disable_notification=True)
+
+    if uid == game.player1:
+        game.player1_dice_message_id = dice_msg.message_id
+    else:
+        game.player2_dice_message_id = dice_msg.message_id
+
+    try:
+        btn_id = game.player1_button_message_id if uid == game.player1 else game.player2_button_message_id
+        if btn_id:
+            await get_bot().delete_message(uid, btn_id)
+            if uid == game.player1:
+                game.player1_button_message_id = None
+            else:
+                game.player2_button_message_id = None
+    except Exception:
+        pass
+
+    await process_dice_roll(game, uid, dice_msg.dice.value)
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+
 async def process_dice_roll(game: GameRoom, player_id: int, dice_value: int):
     game.results[player_id] = dice_value
     player_name = await get_username(player_id)
@@ -1938,8 +2009,7 @@ async def process_dice_roll(game: GameRoom, player_id: int, dice_value: int):
     except Exception:
         pass
 
-    emoji_label = "⚽ пенальти" if config["emoji"] == "⚽" else config["emoji"]
-    wait_msg = await get_bot().send_message(game.chat_id, f"⏳ {player_name} забивает {emoji_label}, ожидаем результат...")
+    wait_msg = await get_bot().send_message(game.chat_id, f"⏳ {player_name} {config['action']}, ожидаем результат...")
     game.last_roll_message_id = wait_msg.message_id
 
     async def show_result():
@@ -1950,8 +2020,12 @@ async def process_dice_roll(game: GameRoom, player_id: int, dice_value: int):
             except Exception:
                 pass
 
+            score_text = {
+                "⚽": f"{'⚽ ГОЛ!' if dice_value > 3 else '❌ Промах!'}",
+                "🏀": f"{'🏀 Попадание!' if dice_value > 3 else '❌ Промах!'}",
+            }.get(config["emoji"], f"{dice_value}")
             result_msg = await get_bot().send_message(
-                game.chat_id, f"{player_name} выбросил {dice_value} {config['emoji']}!" if config["emoji"] != "⚽" else f"{player_name} забивает: {dice_value} {'⚽ ГОЛ!' if dice_value > 3 else '❌ Промах!'}"
+                game.chat_id, f"{player_name}: {score_text} {config['emoji']}"
             )
             game.last_roll_message_id = result_msg.message_id
 
@@ -2037,18 +2111,18 @@ async def determine_winner(game: GameRoom):
                     await update_balance(game.player2, game.bet, "refund")
                     result_msg = "⚽ Оба промахнулись! Ничья — ставки возвращены."
             elif game.game_type == "баскетбол":
-                p1_basket = p1_score == 6
-                p2_basket = p2_score == 6
+                p1_basket = p1_score > 3
+                p2_basket = p2_score > 3
                 if p1_basket and p2_basket:
                     await update_balance(game.player1, game.bet, "refund")
                     await update_balance(game.player2, game.bet, "refund")
                     result_msg = "🏀 Оба попали в кольцо! Ничья — ставки возвращены."
                 elif p1_basket:
                     winner = game.player1
-                    result_msg = f"🏀 Попадание! {await get_username(winner)} выигрывает матч!\n💰 Выигрыш: {prize} монет\n💼 Комиссия: {commission} монет"
+                    result_msg = f"🏀 Попадание! {await get_username(winner)} забивает и побеждает!\n💰 Выигрыш: {prize} монет\n💼 Комиссия: {commission} монет"
                 elif p2_basket:
                     winner = game.player2
-                    result_msg = f"🏀 Попадание! {await get_username(winner)} выигрывает матч!\n💰 Выигрыш: {prize} монет\n💼 Комиссия: {commission} монет"
+                    result_msg = f"🏀 Попадание! {await get_username(winner)} забивает и побеждает!\n💰 Выигрыш: {prize} монет\n💼 Комиссия: {commission} монет"
                 else:
                     await update_balance(game.player1, game.bet, "refund")
                     await update_balance(game.player2, game.bet, "refund")
@@ -2154,6 +2228,33 @@ async def determine_winner(game: GameRoom):
             if game.room_id in active_games:
                 game.is_finished = True
                 del active_games[game.room_id]
+
+
+async def show_countdown(game: GameRoom, total: int):
+    for remaining in range(total, 0, -5):
+        if game.is_finished:
+            return
+        await asyncio.sleep(5)
+        if game.is_finished or game.player2 is not None:
+            return
+        try:
+            p1_name = await get_username(game.player1)
+            msg = (
+                f"🎉 Создана новая игра в {GAMES_CONFIG[game.game_type]['emoji']}!\n"
+                f"💵 Ставка: {game.bet} монет\n"
+                f"⏳ Присоединиться: {remaining} сек\n"
+                f"Игрок 1: {p1_name}\n"
+                f"Места: 1/2"
+            )
+            await get_bot().edit_message_text(
+                chat_id=game.chat_id,
+                message_id=game.message_id,
+                text=msg,
+                reply_markup=game_keyboard(game.room_id, game.player1),
+            )
+        except Exception:
+            pass
+    game.timer_task = None
 
 
 async def game_timeout(room_id: str, delay: int):
