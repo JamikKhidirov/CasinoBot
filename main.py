@@ -65,6 +65,14 @@ async def main():
     logger.info("Бот запущен")
     try:
         await dp.start_polling(bot, drop_pending_updates=True)
+    except Exception as e:
+        logger.critical(f"Ошибка запуска: {e}")
+        if "getaddrinfo failed" in str(e) or "Cannot connect to host api.telegram.org" in str(e):
+            logger.critical("Telegram API заблокирован. Укажите PROXY_URL в config.py")
+            print("\n❌ Telegram API заблокирован в вашем регионе.")
+            print("📌 Укажите PROXY_URL в config.py, например:")
+            print("   PROXY_URL = 'socks5://127.0.0.1:1080'")
+            print("   PROXY_URL = 'http://proxy:8080'\n")
     finally:
         await bot.session.close()
         close_db()

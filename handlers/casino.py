@@ -589,7 +589,10 @@ async def cmd_admin_add_balance(message: Message):
 
     await update_balance(user_id, amount, "admin_add")
     await clean_reply(message, f"✅ Баланс пользователя <code>{user_id}</code> пополнен на <b>{amount}</b> монет!")
-    await get_bot().send_message(user_id, f"Администратор пополнил ваш баланс на {amount} монет! 🎉")
+    try:
+        await get_bot().send_message(user_id, f"Администратор пополнил ваш баланс на {amount} монет! 🎉")
+    except Exception:
+        pass
 
 
 @router.message(Command("бонус"))
