@@ -1,7 +1,6 @@
 import asyncio
 import logging
 from aiogram import Bot, Dispatcher
-from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.types import BotCommand
 import config
 from db import init_db, close_db
@@ -43,10 +42,11 @@ async def main():
 
     session = None
     if config.PROXY_URL:
+        from aiogram.client.session.aiohttp import AiohttpSession
         session = AiohttpSession(proxy=config.PROXY_URL)
         logger.info(f"Прокси: {config.PROXY_URL}")
 
-    bot = Bot(token=config.BOT_TOKEN, session=session)
+    bot = Bot(token=config.BOT_TOKEN, session=session) if config.PROXY_URL else Bot(token=config.BOT_TOKEN)
     casino_setup(bot)
     dp = Dispatcher()
 
@@ -68,11 +68,9 @@ async def main():
     except Exception as e:
         logger.critical(f"Ошибка запуска: {e}")
         if "getaddrinfo failed" in str(e) or "Cannot connect to host api.telegram.org" in str(e):
-            logger.critical("Telegram API заблокирован. Укажите PROXY_URL в config.py")
+            logger.critical("Telegram API заблокирован. Используйте VPN.")
             print("\n❌ Telegram API заблокирован в вашем регионе.")
-            print("📌 Укажите PROXY_URL в config.py, например:")
-            print("   PROXY_URL = 'socks5://127.0.0.1:1080'")
-            print("   PROXY_URL = 'http://proxy:8080'\n")
+            print("📌 Включите VPN и перезапустите бота.\n")
     finally:
         await bot.session.close()
         close_db()
