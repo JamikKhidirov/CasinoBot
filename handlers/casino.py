@@ -454,6 +454,7 @@ async def cb_casino_unlock(call: CallbackQuery):
 
 
 @router.message(Command("профиль"))
+@router.message(Command("profile"))
 async def cmd_profile(message: Message):
     user = await get_user(message.from_user.id)
     if not user:
@@ -893,6 +894,7 @@ async def cmd_admin_add_balance(message: Message):
 
 
 @router.message(Command("бонус"))
+@router.message(Command("bonus"))
 async def cmd_daily_bonus(message: Message):
     user_id = message.from_user.id
     user = await get_user(user_id)
@@ -931,6 +933,7 @@ async def cmd_daily_bonus(message: Message):
 
 
 @router.message(Command("топ"))
+@router.message(Command("top"))
 async def cmd_top(message: Message):
     conn = await get_db()
     try:
@@ -955,6 +958,7 @@ async def cmd_top(message: Message):
 
 
 @router.message(Command("игры"))
+@router.message(Command("games"))
 async def cmd_games(message: Message):
     text = "<b>🕹 Доступные игры:</b>\n\n"
     for game_type, cfg in GAMES_CONFIG.items():
@@ -964,6 +968,7 @@ async def cmd_games(message: Message):
 
 
 @router.message(Command("активные"))
+@router.message(Command("active"))
 async def cmd_active_games(message: Message):
     async with active_games_lock:
         if not active_games:
@@ -987,6 +992,7 @@ async def cmd_active_games(message: Message):
 
 
 @router.message(Command("разблокировать"))
+@router.message(Command("unlock"))
 async def cmd_force_unlock(message: Message):
     user_id = message.from_user.id
     refunded = 0
@@ -1015,6 +1021,7 @@ async def cmd_force_unlock(message: Message):
 
 
 @router.message(Command("игроки"))
+@router.message(Command("players"))
 async def cmd_all_players(message: Message):
     if not await has_perm(message.from_user.id, "view_players"):
         await clean_reply(message, "❌ Доступ запрещён!")
@@ -1372,11 +1379,7 @@ async def _send_admin_help(target, user_id: int):
         safe_cmd = cmd.replace("<", "&lt;").replace(">", "&gt;")
         text += f"┣ <code>{safe_cmd}</code>\n┃ └ {desc}\n\n"
     text += f"┣ <b>Ваши права:</b> {', '.join(f'<code>{p}</code>' for p in perms) if perms else '<i>нет прав</i>'}"
-    buttons = []
-    for cmd, desc in ADMIN_COMMANDS.items():
-        cmd_clean = cmd.split(" ")[0]
-        buttons.append([InlineKeyboardButton(text=f"📋 {cmd_clean}", callback_data=f"admin_cmd_{cmd_clean[1:]}")])
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin")])
+    buttons = [[InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin")]]
     try:
         await target.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     except:
@@ -1814,6 +1817,25 @@ def make_game_handler(game_type: str):
 
 for gt in GAMES_CONFIG:
     make_game_handler(gt)
+
+# English aliases for game commands
+ENG_GAME_ALIASES = {
+    "куб": "dice", "боулинг": "bowling", "дротики": "darts",
+    "баскетбол": "basket", "футбол": "football",
+}
+for game_type, eng_cmd in ENG_GAME_ALIASES.items():
+    @router.message(Command(eng_cmd))
+    async def eng_handler(message: Message, gt=game_type):
+        try:
+            parts = message.text.split()
+            if len(parts) < 2:
+                await message.reply(f"❌ Укажите ставку! Пример: /{eng_cmd} [ставка]")
+                return
+            bet = int(parts[1])
+        except ValueError:
+            await message.reply("❌ Некорректная ставка! Используйте числовое значение.")
+            return
+        await create_game_for_user(message, message.from_user, message.from_user.id, gt, bet)
 
 
 @router.callback_query(F.data.startswith("casino_pick_game_"))

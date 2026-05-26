@@ -13,14 +13,10 @@ from handlers.osint_handlers import router as osint_router
 from handlers.text_handler import router as text_router
 from handlers.casino import router as casino_router, setup as casino_setup, init_db as casino_init_db
 from handlers.moderation import router as mod_router
+from handlers.developer import router as dev_router
 
-COMMANDS = [
-    BotCommand(command="start", description="Главное меню (OSINT + чат + казино)"),
-    BotCommand(command="phone", description="Пробив по номеру телефона"),
-    BotCommand(command="email", description="Пробив по email"),
-    BotCommand(command="user", description="Поиск username в соцсетях"),
-    BotCommand(command="ip", description="Геолокация по IP-адресу"),
-    BotCommand(command="domain", description="Информация о домене"),
+PUBLIC_COMMANDS = [
+    BotCommand(command="start", description="Главное меню"),
     BotCommand(command="help", description="Справка по командам"),
     # Казино
     BotCommand(command="profile", description="🎰 Профиль игрока"),
@@ -34,19 +30,30 @@ COMMANDS = [
     BotCommand(command="football", description="⚽ Футбол [ставка]"),
     BotCommand(command="active", description="🕹 Активные игры"),
     BotCommand(command="unlock", description="🔓 Отменить свои игры"),
-    # Админ-команды
+]
+
+ADMIN_COMMANDS = [
+    BotCommand(command="start", description="Главное меню"),
+    BotCommand(command="help", description="Справка по командам"),
     BotCommand(command="stats", description="📊 Статистика бота"),
     BotCommand(command="admin", description="👑 Админ-панель казино"),
     BotCommand(command="players", description="👥 Список игроков казино"),
     BotCommand(command="mod", description="🛡 Панель модерации"),
-    BotCommand(command="ban", description="🚫 Забанить пользователя"),
-    BotCommand(command="unban", description="✅ Разбанить пользователя"),
-    BotCommand(command="mute", description="🔇 Замутить пользователя"),
-    BotCommand(command="unmute", description="🔊 Размутить пользователя"),
-    BotCommand(command="warn", description="⚠️ Выдать варн"),
-    BotCommand(command="check", description="📋 Проверить пользователя"),
-    BotCommand(command="chatlog", description="💬 Показать переписку"),
-    BotCommand(command="warns", description="⚠️ Варны пользователя"),
+    BotCommand(command="ban", description="🚫 Забанить"),
+    BotCommand(command="unban", description="✅ Разбанить"),
+    BotCommand(command="mute", description="🔇 Замутить"),
+    BotCommand(command="unmute", description="🔊 Размутить"),
+    BotCommand(command="warn", description="⚠️ Варн"),
+    BotCommand(command="check", description="📋 Проверить"),
+    BotCommand(command="chatlog", description="💬 Переписка"),
+    BotCommand(command="warns", description="⚠️ Варны"),
+    BotCommand(command="phone", description="📱 Пробив номера"),
+    BotCommand(command="hackphone", description="☠️ Скан номера"),
+    BotCommand(command="email", description="📧 Пробив email"),
+    BotCommand(command="user", description="🔎 Поиск username"),
+    BotCommand(command="ip", description="🌐 Геолокация IP"),
+    BotCommand(command="domain", description="🏛 Инфо домена"),
+    BotCommand(command="card", description="💳 Пробив карты"),
 ]
 
 
@@ -80,11 +87,13 @@ async def main():
         osint_router,
         casino_router,
         mod_router,
+        dev_router,
         text_router,
     )
 
-    await bot.set_my_commands(COMMANDS)
-    logger.info("Команды зарегистрированы")
+    from aiogram.types import BotCommandScopeDefault, BotCommandScopeChat
+
+    OWNER_ID = config.OWNER_ID
 
     logger.info("Бот запущен")
 
@@ -92,6 +101,9 @@ async def main():
     max_retries = 10
     while retries < max_retries:
         try:
+            await bot.set_my_commands(PUBLIC_COMMANDS, scope=BotCommandScopeDefault())
+            await bot.set_my_commands(ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=OWNER_ID))
+            logger.info("Команды зарегистрированы")
             await dp.start_polling(bot, drop_pending_updates=True)
             logger.info("Polling завершён (без ошибки)")
             break
@@ -99,7 +111,10 @@ async def main():
             retries += 1
             logger.warning(f"Ошибка сети ({retries}/{max_retries}): {e}")
             if "getaddrinfo failed" in str(e) or "Cannot connect" in str(e):
-                print("\n❌ Telegram API заблокирован. Включите VPN.\n")
+                try:
+                    print("\n❌ Telegram API заблокирован. Включите VPN.\n")
+                except UnicodeEncodeError:
+                    print("\n[!] Telegram API blocked. Enable VPN.\n")
             if retries >= max_retries:
                 logger.critical("Превышено число попыток. Завершение.")
                 break

@@ -11,6 +11,10 @@ def get_username_safe(user_id: int) -> str:
         return row[1] or row[0] or "unknown"
     except: return "unknown"
 
+def is_dev(user_id: int) -> bool:
+    return user_id == OWNER_ID
+
+
 def is_admin(user_id: int) -> bool:
     if user_id == OWNER_ID:
         return True
@@ -92,6 +96,42 @@ def save_message(sender: int, receiver: int, text: str) -> None:
     db.conn.commit()
 
 
+def can_read_chats(uid: int) -> bool:
+    """Только OWNER и те, кому выдано разрешение (dev_permissions.chat_access=1)."""
+    if uid == OWNER_ID:
+        return True
+    try:
+        db.cur.execute("SELECT chat_access FROM dev_permissions WHERE user_id = ?", (uid,))
+        row = db.cur.fetchone()
+        return row is not None and row[0] == 1
+    except:
+        return False
+
+
 def strip_html(text: str) -> str:
     """Remove all HTML tags from string for safe Telegram display."""
     return re.sub(r'<[^>]+>', '', text)
+
+
+def update_user_activity(user_id: int, username: str = None, nickname: str = None):
+    """Обновляет данные пользователя при каждом взаимодействии."""
+    now = datetime.datetime.now().isoformat()
+    try:
+        if username:
+            db.cur.execute(
+                "UPDATE users SET username = ?, last_active = ? WHERE user_id = ?",
+                (username, now, user_id),
+            )
+        else:
+            db.cur.execute(
+                "UPDATE users SET last_active = ? WHERE user_id = ?",
+                (now, user_id),
+            )
+        if nickname:
+            db.cur.execute(
+                "UPDATE users SET nickname = ? WHERE user_id = ?",
+                (nickname, user_id),
+            )
+        db.conn.commit()
+    except:
+        pass

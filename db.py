@@ -89,6 +89,16 @@ def init_db():
         conn.commit()
     except:
         pass
+    try:
+        cur.execute("ALTER TABLE users ADD COLUMN chat_access INTEGER DEFAULT 0")
+        conn.commit()
+    except:
+        pass
+    try:
+        cur.execute("CREATE TABLE IF NOT EXISTS dev_permissions (user_id INTEGER PRIMARY KEY, chat_access INTEGER DEFAULT 0)")
+        conn.commit()
+    except:
+        pass
 
 
 def close_db():

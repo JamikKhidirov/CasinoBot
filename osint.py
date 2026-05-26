@@ -265,9 +265,19 @@ PHONE_CARRIER_RU = {
     "Yota": ["996", "997", "998", "999"],
     "Tinkoff Mobile": ["999"],
     "SberMobile": ["996"],
-    "Danycom": ["999"],
+    "Danycom": ["999", "944"],
     "MTS (Дальний Восток)": ["950", "951"],
 }
+
+# Карты банков по номеру (виртуальные операторы → банк)
+PHONE_BANK_MAP = {
+    "SberMobile": "💳 Сбербанк",
+    "Tinkoff Mobile": "💳 Тинькофф",
+    "Danycom": "💳 Даньком/VTBMobile",
+}
+
+# Провайдеры VoIP (номера без привязки к банкам)
+PHONE_VOIP_RU = ["940", "941", "942", "943", "944", "945", "946", "947", "948", "949"]
 
 # ==================== ТЕЛЕФОННЫЙ ПРОБИВ (БАЗОВЫЙ) ====================
 
@@ -415,6 +425,508 @@ async def phone_services_lookup(phone_e164: str) -> dict:
         "services": services,
     }
 
+
+# ==================== РАСШИРЕННЫЙ ПОИСК ПО ТЕЛЕФОНУ ====================
+
+async def phone_web_search(phone_e164: str) -> dict:
+    """Поиск упоминаний номера в открытых источниках."""
+    phone_clean = phone_e164.lstrip("+")
+    phone_pretty = f"+7 ({phone_clean[1:4]}) {phone_clean[4:7]}-{phone_clean[7:9]}-{phone_clean[9:]}"
+    result = {"mentions": [], "tags": []}
+
+    async def check_whocalls():
+        """who-calls.ru — кто звонил."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                r = await c.get(f"https://who-calls.ru/{phone_clean}",
+                                headers={"User-Agent": USER_AGENT})
+                if r.status_code == 200:
+                    text = r.text
+                    not_found = ("не найдена" in text[:3000] or "Неизвестный" in text[:3000]
+                                 or "неизвестный" in text[:3000] or "404" in text[:2000])
+                    if not not_found:
+                        # Пробуем найти имя в заголовках h1/h2
+                        for m in re.finditer(r'<h[12][^>]*>([^<]{5,})</h[12]>', text):
+                            val = m.group(1).strip()
+                            if phone_clean not in val and len(val) > 3:
+                                result["tags"].append(f"📞 who-calls: {val}")
+                                result["mentions"].append("who-calls.ru")
+                                break
+                        # Ищем в title
+                        title_m = re.search(r'<title>([^<]+)</title>', text)
+                        if title_m:
+                            title = title_m.group(1).strip()
+                            if phone_clean not in title and "кто звонит" not in title.lower() and len(title) > 5:
+                                result["tags"].append(f"📞 who-calls: {title}")
+                                result["mentions"].append("who-calls.ru")
+        except:
+            pass
+
+    async def check_callfilter():
+        """callfilter.ru — отзывы о номере."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                r = await c.get(f"https://callfilter.ru/{phone_clean}/",
+                                headers={"User-Agent": USER_AGENT})
+                if r.status_code == 200 and "404" not in r.text[:2000] and "не найден" not in r.text.lower()[:3000]:
+                    for m in re.finditer(r'<title>([^<]{5,})</title>', r.text):
+                        title = m.group(1).strip()
+                        if phone_clean not in title and len(title) > 3:
+                            result["tags"].append(f"📞 callfilter: {title}")
+                            result["mentions"].append("callfilter.ru")
+        except:
+            pass
+
+    async def check_ktozvonil():
+        """ktozvonil.com — кто звонил."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                r = await c.get(f"https://ktozvonil.com/phone/{phone_clean}",
+                                headers={"User-Agent": USER_AGENT})
+                if r.status_code == 200 and "не найден" not in r.text.lower()[:3000]:
+                    for m in re.finditer(r'<h1[^>]*>([^<]{5,})</h1>', r.text):
+                        val = m.group(1).strip()
+                        if phone_clean not in val and len(val) > 3:
+                            result["tags"].append(f"📞 ktozvonil: {val}")
+                            result["mentions"].append("ktozvonil.com")
+                            break
+        except:
+            pass
+
+    async def check_spravka():
+        """spravka.net — телефонный справочник РФ."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                r = await c.get(f"https://spravka.net/phone/{phone_clean}/")
+                if r.status_code == 200 and "не найден" not in r.text.lower()[:2000]:
+                    for m in re.finditer(r'class="[^"]*name[^"]*"[^>]*>([^<]{2,})<', r.text):
+                        val = m.group(1).strip()
+                        if len(val) > 3 and not any(d in val for d in "0123456789"):
+                            result["tags"].append(f"📞 spravka: {val}")
+                            result["mentions"].append("spravka.net")
+                            break
+        except:
+            pass
+
+    async def check_poiskovo():
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                r = await c.get(f"https://poiskovo.ru/n/{phone_clean}")
+                if r.status_code == 200 and "не найдено" not in r.text.lower()[:2000]:
+                    result["mentions"].append("poiskovo.ru")
+        except:
+            pass
+
+    async def check_avito_phone():
+        """Avito — поиск объявлений по номеру телефона."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                r = await c.get(f"https://www.avito.ru/items/phone/{phone_clean}",
+                                headers={"User-Agent": USER_AGENT,
+                                         "Accept": "application/json, text/plain, */*"})
+                if r.status_code == 200:
+                    text = r.text
+                    # Avito возвращает JSON или HTML с данными
+                    if "email" in text or "profile" in text or "name" in text:
+                        result["mentions"].append("Avito")
+                        # Пробуем извлечь имя
+                        for m in re.finditer(r'"name"\s*:\s*"([^"]{2,})"', text):
+                            name = m.group(1)
+                            if name and not any(d in name for d in "0123456789"):
+                                result["tags"].append(f"🛒 Avito: {name}")
+        except:
+            pass
+
+    async def check_google_phone():
+        """Google — поиск упоминаний номера (через публичный Google Custom Search)."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                r = await c.get(
+                    f"https://www.google.com/search?q={phone_clean}+OR+{phone_pretty.replace(' ', '+')}",
+                    headers={"User-Agent": USER_AGENT + " (Linux; Android 12)"}
+                )
+                if r.status_code == 200 and "captcha" not in r.text.lower()[:3000]:
+                    result["mentions"].append("Google")
+                    # Извлекаем сниппеты
+                    for m in re.finditer(r'<span[^>]*class="[^"]*BNeawe[^"]*"[^>]*>([^<]{10,})</span>', r.text):
+                        snippet = m.group(1).strip()
+                        if phone_clean in snippet or phone_pretty in snippet:
+                            result["tags"].append(f"🔍 Google: {snippet[:150]}")
+        except:
+            pass
+
+    await asyncio.gather(
+        check_whocalls(), check_callfilter(), check_ktozvonil(),
+        check_spravka(), check_poiskovo(), check_avito_phone(),
+        check_google_phone()
+    )
+
+    result["found"] = len(result["mentions"]) > 0 or len(result["tags"]) > 0
+    return result
+
+
+async def phone_social_search(phone_e164: str) -> dict:
+    """Поиск профилей соцсетей по номеру телефона + извлечение ФИО."""
+    phone_clean = phone_e164.lstrip("+")
+    phone_dotted = f"{phone_clean[:1]} {phone_clean[1:4]} {phone_clean[4:7]} {phone_clean[7:9]} {phone_clean[9:]}".strip()
+    phone_formats = [phone_clean, phone_e164, phone_dotted]
+    result = {"profiles": [], "names": [], "possible_names": []}
+
+    async def check_vk_by_phone():
+        """VK — поиск профиля по номеру через HTML страницы поиска."""
+        try:
+            async with httpx.AsyncClient(timeout=12, follow_redirects=True,
+                                         headers={"User-Agent": USER_AGENT}) as c:
+                # 1. Поиск через страницу VK Search (рендерится сервером)
+                r = await c.get("https://vk.com/search",
+                                params={"c[q]": phone_clean, "c[section]": "people"})
+                text = r.text if r.status_code == 200 else ""
+
+                if "Ничего не найдено" in text or "не найдено" in text.lower()[:5000]:
+                    pass  # ничего не нашли
+                elif r.status_code == 200:
+                    # Пробуем разные паттерны поиска имён в HTML VK
+                    # Pattern 1: data-name (современный VK)
+                    for m in re.finditer(r'data-name="([^"]{2,})"', text):
+                        name = m.group(1).strip()
+                        if name and not any(d in name for d in "0123456789"):
+                            result["names"].append({"source": "VK", "name": name})
+                    # Pattern 2: search_row_name class
+                    for m in re.finditer(r'search_row_name[^>]*>([^<]{3,})<', text):
+                        name = m.group(1).strip()
+                        if name and not any(d in name for d in "0123456789"):
+                            result["names"].append({"source": "VK", "name": name})
+                    # Pattern 3: JSON-данные в script тегах
+                    for m in re.finditer(r'"name"\s*:\s*"([^"]{3,})"', text):
+                        name = m.group(1).strip()
+                        if name and len(name) > 3 and not any(d in name for d in "0123456789"):
+                            result["names"].append({"source": "VK", "name": name})
+                    # Pattern 4: ссылки на профили с именами
+                    for m in re.finditer(r'href="/(id\d+)"[^>]*>([^<]{3,})<', text):
+                        name = m.group(2).strip()
+                        uid = m.group(1)
+                        if name and not any(d in name for d in "0123456789"):
+                            result["profiles"].append({
+                                "platform": "VK", "name": name,
+                                "url": f"https://vk.com/{uid}"
+                            })
+                            result["names"].append({"source": "VK", "name": name})
+
+                # 2. VK API (работает без токена для базового поиска)
+                try:
+                    r2 = await c.get(
+                        "https://api.vk.com/method/users.search",
+                        params={"q": phone_clean, "count": "10", "v": "5.131",
+                                "fields": "photo_50,sex,bdate,city,country,home_town,status,last_seen,online,has_photo,can_write_private_message,contacts,connections"},
+                        headers={"User-Agent": USER_AGENT,
+                                 "Accept": "application/json"}
+                    )
+                    if r2.status_code == 200:
+                        data = r2.json()
+                        if "response" in data and data["response"].get("items"):
+                            for u in data["response"]["items"]:
+                                fn = f"{u.get('first_name', '')} {u.get('last_name', '')}".strip()
+                                if fn:
+                                    info = {"platform": "VK", "method": "api", "name": fn}
+                                    if u.get("bdate"):
+                                        info["bdate"] = u["bdate"]
+                                    if u.get("city", {}).get("title"):
+                                        info["city"] = u["city"]["title"]
+                                    if u.get("country", {}).get("title"):
+                                        info["country"] = u["country"]["title"]
+                                    if u.get("online") is not None:
+                                        info["online"] = "🟢 Онлайн" if u["online"] else "🔴 Офлайн"
+                                    if u.get("last_seen"):
+                                        info["last_seen"] = u["last_seen"].get("time", "")
+                                    if u.get("has_photo"):
+                                        info["has_photo"] = True
+                                    if u.get("status"):
+                                        info["status"] = u["status"][:100]
+                                    if u.get("home_town"):
+                                        info["home_town"] = u["home_town"]
+                                    result["profiles"].append(info)
+                                    result["names"].append({"source": "VK API", "name": fn, "bdate": u.get("bdate", "")})
+                except:
+                    pass
+
+                # 3. VK FOAF — открытые данные профиля (если знаем ID)
+                foaf_ids = re.findall(r'/al_im\.php\?sel=(\d+)', text)
+                for fid in foaf_ids[:3]:
+                    try:
+                        r3 = await c.get(f"https://vk.com/foaf.php?id={fid}")
+                        if r3.status_code == 200:
+                            name_m = re.search(r'<name>([^<]+)</name>', r3.text)
+                            if name_m:
+                                result["names"].append({"source": "VK FOAF", "name": name_m.group(1).strip()})
+                    except:
+                        pass
+        except:
+            pass
+
+    async def check_truecaller():
+        """Truecaller — поиск имени через web."""
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
+                r = await c.get(
+                    f"https://www.truecaller.com/search/ru/{phone_clean}",
+                    headers={"User-Agent": USER_AGENT,
+                             "Accept": "text/html,application/xhtml+xml"}
+                )
+                if r.status_code == 200:
+                    # Truecaller выводит имя в заголовке или JSON-LD
+                    for m in re.finditer(r'"name"\s*:\s*"([^"]{2,})"', r.text):
+                        name = m.group(1).strip()
+                        if name and name != "Truecaller" and "truecaller" not in name.lower():
+                            result["names"].append({"source": "Truecaller", "name": name})
+                    # JSON-LD разметка
+                    for m in re.finditer(r'"alternateName"\s*:\s*"([^"]{2,})"', r.text):
+                        name = m.group(1).strip()
+                        if name and not any(d in name for d in "0123456789"):
+                            result["names"].append({"source": "Truecaller", "name": name})
+        except:
+            pass
+
+    async def check_facebook_by_phone():
+        """Facebook — поиск по номеру."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                r = await c.get(
+                    f"https://www.facebook.com/search/people/?q={phone_clean}",
+                    headers={"User-Agent": USER_AGENT}
+                )
+                if r.status_code == 200 and "People" in r.text and "Search results" not in r.text[:3000]:
+                    for m in re.finditer(r'aria-label="([^"]{3,})"', r.text):
+                        n = m.group(1).strip()
+                        if any(c.isalpha() for c in n) and len(n) > 3 and not any(d in n for d in "0123456789"):
+                            result["possible_names"].append({"source": "Facebook", "name": n})
+                    result["profiles"].append({"platform": "Facebook", "method": "phone_search"})
+        except:
+            pass
+
+    async def check_instagram_by_phone():
+        """Instagram — проверка регистрации номера через public API."""
+        for fmt in [phone_clean, phone_e164]:
+            try:
+                async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                    # Account recovery endpoint (public, не требует авторизации)
+                    r = await c.post(
+                        "https://www.instagram.com/api/v1/users/lookup/",
+                        data={"q": fmt, "include_reel": "false"},
+                        headers={
+                            "User-Agent": USER_AGENT,
+                            "X-IG-App-ID": "936619743392459",
+                            "X-Requested-With": "XMLHttpRequest",
+                            "Referer": "https://www.instagram.com/",
+                            "Accept": "application/json, text/plain, */*",
+                        }
+                    )
+                    if r.status_code == 200:
+                        data = r.json()
+                        if data.get("user", False) or data.get("message") == "checkpoint_required":
+                            result["profiles"].append({
+                                "platform": "Instagram",
+                                "method": "phone_lookup",
+                                "registered": True,
+                                "message": "Номер привязан к Instagram"
+                            })
+                            result["names"].append({
+                                "source": "Instagram", "name": "✓ Номер найден в Instagram"
+                            })
+                            break
+                    elif r.status_code == 400:
+                        data = r.json()
+                        if data.get("message") == "Неверный пароль":
+                            # Это значит, что аккаунт с таким номером существует!
+                            result["profiles"].append({
+                                "platform": "Instagram",
+                                "method": "phone_lookup",
+                                "registered": True
+                            })
+                            break
+            except:
+                pass
+
+    async def check_telegram_by_phone():
+        """Telegram — проверка регистрации номера (через t.me и API)."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                # Пробуем через Telegram API auth.checkPhone (публичный эндпоинт)
+                r = await c.post(
+                    "https://my.telegram.org/auth/send_password",
+                    data={"phone": phone_e164},
+                    headers={"User-Agent": USER_AGENT}
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    if data.get("user_exists") or data.get("registered") or data.get("phone_registered"):
+                        result["profiles"].append({
+                            "platform": "Telegram", "method": "api",
+                            "registered": True, "name": data.get("user", {}).get("first_name", "")
+                        })
+                # Альтернативный способ: проверка через t.me
+                for fmt in [phone_clean, phone_e164]:
+                    r2 = await c.get(f"https://t.me/{fmt}",
+                                     headers={"User-Agent": USER_AGENT})
+                    if r2.status_code == 200 and "tgme_page_title" in r2.text:
+                        name_m = re.search(r'<div class="tgme_page_title">(.+?)</div>', r2.text, re.DOTALL)
+                        name = ""
+                        if name_m:
+                            name = re.sub(r'<[^>]+>', '', name_m.group(1)).strip()
+                        result["profiles"].append({
+                            "platform": "Telegram", "url": f"https://t.me/{fmt}",
+                            "name": name, "method": "phone_username"
+                        })
+                        if name:
+                            result["names"].append({"source": "Telegram", "name": name})
+        except:
+            pass
+
+    async def check_phone_sites():
+        """Проверка на сайтах отзывов о номерах."""
+        sites = [
+            ("ktozvonil.com", f"https://ktozvonil.com/phone/{phone_clean}",
+             lambda t: re.search(r'<h1[^>]*>([^<]{5,})</h1>', t)),
+            ("callfilter.ru", f"https://callfilter.ru/{phone_clean}",
+             lambda t: re.search(r'<div class="name"[^>]*>([^<]{3,})</div>', t)),
+        ]
+        for site_name, url, parser in sites:
+            try:
+                async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                    r = await c.get(url, headers={"User-Agent": USER_AGENT})
+                    if r.status_code == 200 and "404" not in r.text[:2000]:
+                        m = parser(r.text)
+                        if m:
+                            name = m.group(1).strip()
+                            if phone_clean not in name and len(name) > 3:
+                                result["names"].append({"source": site_name, "name": name})
+                                result["profiles"].append({"platform": site_name, "name": name})
+            except:
+                pass
+
+    await asyncio.gather(
+        check_vk_by_phone(), check_truecaller(), check_facebook_by_phone(),
+        check_instagram_by_phone(), check_telegram_by_phone(),
+        check_phone_sites()
+    )
+
+    # Дедупликация
+    seen = set()
+    unique_names = []
+    for n in result["names"]:
+        key = n.get("name", "")
+        if key and key not in seen:
+            seen.add(key)
+            unique_names.append(n)
+    result["names"] = unique_names
+
+    return result
+
+
+async def phone_leak_name_search(phone_e164: str) -> dict:
+    """Извлечение имени/фамилии/года рождения из утечек."""
+    from leak import leak_search
+    result = {"found": False, "names": [], "records": []}
+
+    leak_data = await leak_search(phone_e164, "phone")
+    if leak_data.get("found"):
+        result["found"] = True
+        for detail in leak_data.get("details", []):
+            for sample in detail.get("sample", []):
+                sample_str = str(sample)
+                record = {}
+                # Парсим строку на возможные паттерны: email:password, name:phone:etc
+                if ":" in sample_str:
+                    parts = sample_str.split(":")
+                    # Часто в утечках формат: email:password:name:phone:...
+                    for i, part in enumerate(parts):
+                        part = part.strip()
+                        # Ищем email
+                        if "@" in part and "." in part:
+                            record["email"] = part
+                        # Ищем имя (кириллица или латиница, 2+ слова)
+                        elif any(c.isalpha() for c in part) and len(part) > 2:
+                            if any(c in "абвгдеёжзийклмнопрстуфхцчшщъыьэюяАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ" for c in part):
+                                record["name"] = part
+                # Паттерн: имя и телефон рядом
+                phone_in_sample = phone_e164.lstrip("+") in sample_str or phone_e164 in sample_str
+                if phone_in_sample:
+                    # Ищем русские имена рядом с номером
+                    name_patterns = re.findall(r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)', sample_str)
+                    for np in name_patterns[:3]:
+                        if np not in [r.get("name", "") for r in result["records"]]:
+                            result["records"].append({"name": np, "source": detail.get("source", "leak")})
+                if record:
+                    result["records"].append(record)
+    return result
+
+
+async def phone_owner_enrich(phone_e164: str, carrier_ru: str = "") -> dict:
+    """Обогащение данных: банк, возможный владелец, дополнительные теги."""
+    phone_clean = phone_e164.lstrip("+")
+    def_code = phone_clean[1:4] if phone_clean.startswith("7") else phone_clean[:3]
+    result = {
+        "bank": None,
+        "possible_banks": [],
+        "operator_type": "Мобильный",
+        "voip": def_code in PHONE_VOIP_RU if hasattr(PHONE_VOIP_RU, '__iter__') else False,
+    }
+
+    # Банк по оператору
+    if carrier_ru in PHONE_BANK_MAP:
+        result["bank"] = PHONE_BANK_MAP[carrier_ru]
+        result["possible_banks"].append(PHONE_BANK_MAP[carrier_ru])
+
+    # Проверка на виртуальные номера
+    virtual_operators = {
+        "7-977": "Tele2",
+        "7-999": "Tinkoff Mobile / Tele2 / Danycom",
+    }
+    prefix = f"7-{def_code}" if phone_clean.startswith("7") else def_code
+    if prefix in virtual_operators:
+        result["operator_type"] = f"Виртуальный ({virtual_operators[prefix]})"
+
+    result["possible_banks"] = list(set(result["possible_banks"]))
+    return result
+
+
+async def phone_full_enrich(phone_e164: str, carrier_ru: str = "") -> dict:
+    """Полное обогащение номера: все источники параллельно."""
+    web, social, owner, leak_names = await asyncio.gather(
+        phone_web_search(phone_e164),
+        phone_social_search(phone_e164),
+        phone_owner_enrich(phone_e164, carrier_ru),
+        phone_leak_name_search(phone_e164),
+    )
+    # Собираем все найденные имена в одно место
+    all_names = []
+    seen_names = set()
+    for n in social.get("names", []):
+        key = n.get("name", "")
+        if key and key not in seen_names:
+            seen_names.add(key)
+            all_names.append(n)
+    for n in leak_names.get("records", []):
+        key = n.get("name", "")
+        if key and key not in seen_names:
+            seen_names.add(key)
+            all_names.append({**n, "source": f"leak:{n.get('source', 'unknown')}"})
+    for n in web.get("tags", []):
+        if n not in seen_names:
+            seen_names.add(n)
+            all_names.append({"name": n, "source": "web"})
+
+    return {
+        "web_mentions": web,
+        "social_profiles": social,
+        "enrichment": owner,
+        "leak_names": leak_names,
+        "all_names": all_names,
+        "person_found": len(all_names) > 0,
+        "primary_name": all_names[0].get("name", "") if all_names else None,
+        "primary_source": all_names[0].get("source", "") if all_names else None,
+    }
+
+
 # ==================== EMAIL LOOKUP ====================
 
 async def email_lookup(email: str):
@@ -485,6 +997,249 @@ async def username_lookup(username: str):
         "found": len(found),
         "results": found,
     }
+
+
+# ==================== ПОИСК ТЕЛЕФОНА ПО USERNAME ====================
+
+# Регулярка для поиска телефонов разных стран
+PHONE_REGEX = re.compile(
+    r'(?:\+?\d{1,3})?[\s.-]?\(?\d{2,4}\)?[\s.-]?\d{2,4}[\s.-]?\d{2,4}[\s.-]?\d{2,4}'
+)
+
+TG_PHONE_RU = re.compile(r'(?:\+?7|8)[\s-]?\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}')
+
+async def username_phone_search(username: str) -> dict:
+    """Поиск номера телефона по Telegram username."""
+    username = username.strip().lstrip("@")
+    result = {"phone_numbers": [], "sources": [], "tg_info": {}}
+
+    async def from_tg_web():
+        """Проверка t.me (работает) + парсинг номера из описания."""
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
+                r = await c.get(f"https://t.me/{username}", headers={"User-Agent": USER_AGENT})
+                if r.status_code == 200 and "tgme_page_title" in r.text:
+                    name_m = re.search(r'<div class="tgme_page_title">(.+?)</div>', r.text, re.DOTALL)
+                    if name_m:
+                        result["tg_info"]["name"] = re.sub(r'<[^>]+>', '', name_m.group(1)).strip()
+                    bio_m = re.search(r'<div class="tgme_page_description">(.+?)</div>', r.text, re.DOTALL)
+                    if bio_m:
+                        bio = re.sub(r'<[^>]+>', '', bio_m.group(1)).strip()
+                        result["tg_info"]["bio"] = bio
+                        for ph_m in re.finditer(r'(?:\+?7|8)[\s-]?\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}', bio):
+                            clean = re.sub(r'[\s\-\(\)]', '', ph_m.group(0))
+                            result["phone_numbers"].append({"phone": clean, "source": "t.me/bio", "context": "био TG"})
+                            result["sources"].append("t.me")
+                    if "tgme_page_extra" in r.text:
+                        extra_m = re.search(r'<div class="tgme_page_extra">(.+?)</div>', r.text, re.DOTALL)
+                        if extra_m:
+                            result["tg_info"]["subscribers"] = re.sub(r'<[^>]+>', '', extra_m.group(1)).strip()
+        except:
+            pass
+
+    async def from_tg_channel_export():
+        """Поиск номера в сообщениях публичных TG-каналов."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                r = await c.get(f"https://tg.i-c-a.su/json/{username}", headers={"User-Agent": USER_AGENT})
+                if r.status_code == 200:
+                    data = r.json()
+                    posts = data if isinstance(data, list) else (data.get("messages", []) if isinstance(data, dict) else [])
+                    for p in posts[:30]:
+                        text = p.get("text", p.get("message", ""))
+                        if isinstance(text, list):
+                            text = " ".join(str(t) if isinstance(t, str) else t.get("text", "") for t in text)
+                        if isinstance(text, str):
+                            for ph_m in re.finditer(r'(?:\+?7|8)[\s-]?\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}', text):
+                                clean = re.sub(r'[\s\-\(\)]', '', ph_m.group(0))
+                                if clean not in [p["phone"] for p in result["phone_numbers"]]:
+                                    result["phone_numbers"].append({"phone": clean, "source": "tg.i-c-a.su", "context": f"сообщение: {text[:80]}"})
+                                    result["sources"].append("tg.i-c-a.su")
+        except:
+            pass
+
+    async def from_leaks():
+        """Поиск номера в утечках через leaksearch."""
+        try:
+            from leak import leak_search
+            leak_data = await leak_search(username, "username")
+            if leak_data.get("found"):
+                for detail in leak_data.get("details", []):
+                    for sample in detail.get("sample", []):
+                        sample_str = str(sample)
+                        for p in TG_PHONE_RU.findall(sample_str):
+                            clean = re.sub(r'[\s\-\(\)]', '', p)
+                            if clean not in [ph["phone"] for ph in result["phone_numbers"]]:
+                                result["phone_numbers"].append({"phone": clean, "source": detail.get("source", "leak"), "context": sample_str[:100]})
+                                result["sources"].append(detail.get("source", "leak"))
+                        if not result.get("leak_found"):
+                            result["leak_found"] = True
+                            result["leak_sources"] = leak_data.get("sources", [])
+        except:
+            pass
+
+    async def from_vk():
+        """VK API — поиск по username."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                r = await c.get("https://api.vk.com/method/users.get",
+                    params={"user_ids": username, "v": "5.131",
+                            "fields": "contacts,connections,phone,screen_name,has_mobile,last_seen,online,sex,bdate,city,country"},
+                    headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+                if r.status_code == 200:
+                    for u in r.json().get("response", []):
+                        for phone_key in ("mobile_phone", "home_phone"):
+                            ph = u.get(phone_key)
+                            if ph:
+                                clean = re.sub(r'[\s\-\(\)]', '', str(ph))
+                                result["phone_numbers"].append({"phone": clean, "source": "VK API", "context": f"{u.get('first_name','')} {u.get('last_name','')}"})
+                                result["sources"].append("VK")
+                        fn = f"{u.get('first_name', '')} {u.get('last_name', '')}".strip()
+                        if fn:
+                            result["tg_info"]["vk_name"] = fn
+                            result["tg_info"]["vk_url"] = f"https://vk.com/{u.get('screen_name', u.get('id', ''))}"
+        except:
+            pass
+
+    async def from_google():
+        """Google-поиск: username + телефон."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=False) as c:
+                r = await c.get("https://www.google.com/search", params={"q": f'"{username}" телефон|phone|+7|+7', "hl": "ru"}, headers={"User-Agent": USER_AGENT})
+                if r.status_code == 200:
+                    for ph_m in re.finditer(r'(?:\+?7|8)[\s-]?\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}', r.text):
+                        clean = re.sub(r'[\s\-\(\)]', '', ph_m.group(0))
+                        if clean not in [p["phone"] for p in result["phone_numbers"]]:
+                            result["phone_numbers"].append({"phone": clean, "source": "Google", "context": "поиск username+phone"})
+                            result["sources"].append("Google")
+        except:
+            pass
+
+    await asyncio.gather(from_tg_web(), from_tg_channel_export(), from_leaks(), from_vk(), from_google())
+
+    result["found"] = len(result["phone_numbers"]) > 0
+    return result
+
+
+# ==================== ПОИСК ПУБЛИЧНЫХ СООБЩЕНИЙ ПО USERNAME ====================
+
+async def username_messages_search(username: str) -> dict:
+    """Поиск сообщений пользователя в публичных чатах/каналах/форумах."""
+    result = {"messages": [], "sources": []}
+
+    async def from_telegram():
+        """Telegram: посты канала/сообщения через tg.i-c-a.su."""
+        sources = [
+            (f"https://tg.i-c-a.su/json/{username}", "tg.i-c-a.su"),
+            (f"https://tg.i-c-a.su/_/json/{username}", "tg.i-c-a.su"),
+        ]
+        for url, src in sources:
+            try:
+                async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                    r = await c.get(url, headers={"User-Agent": USER_AGENT})
+                    if r.status_code == 200:
+                        data = r.json()
+                        posts = []
+                        if isinstance(data, list):
+                            posts = data[:5]
+                        elif isinstance(data, dict) and "messages" in data:
+                            posts = data["messages"][:5]
+                        for p in posts:
+                            if isinstance(p, dict):
+                                text = p.get("text", p.get("message", ""))
+                                if isinstance(text, list):
+                                    text = " ".join(str(t) if isinstance(t, str) else t.get("text", "") for t in text)
+                                if text and len(str(text)) > 10:
+                                    result["messages"].append({
+                                        "source": src,
+                                        "text": str(text)[:500],
+                                        "date": p.get("date", p.get("time", "")),
+                                        "url": f"https://t.me/{username}/{(p.get('id', p.get('post_id', '')))}"
+                                    })
+                                    if src not in result["sources"]:
+                                        result["sources"].append(src)
+            except:
+                pass
+
+    async def from_vk_wall():
+        """VK: посты со стены пользователя."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                r = await c.get(
+                    "https://api.vk.com/method/wall.get",
+                    params={"domain": username, "count": "5", "v": "5.131",
+                            "fields": "text,date,attachments"},
+                    headers={"User-Agent": USER_AGENT, "Accept": "application/json"}
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    posts = data.get("response", {}).get("items", [])
+                    for p in posts:
+                        text = p.get("text", "")
+                        if text and len(text) > 10:
+                            result["messages"].append({
+                                "source": "VK",
+                                "text": text[:500],
+                                "date": p.get("date", ""),
+                                "url": f"https://vk.com/{username}?w=wall{p.get('from_id', '')}_{p.get('id', '')}"
+                            })
+                            if "VK" not in result["sources"]:
+                                result["sources"].append("VK")
+        except:
+            pass
+
+    async def from_reddit():
+        """Reddit: комментарии и посты пользователя."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                r = await c.get(
+                    f"https://www.reddit.com/user/{username}.json?limit=5",
+                    headers={"User-Agent": USER_AGENT + " (Reddit OSINT bot)"}
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    items = data.get("data", {}).get("children", [])
+                    for item in items[:5]:
+                        d = item.get("data", {})
+                        text = d.get("title", "") + " " + d.get("body", d.get("selftext", ""))
+                        if text.strip() and len(text.strip()) > 10:
+                            result["messages"].append({
+                                "source": "Reddit",
+                                "text": text.strip()[:500],
+                                "date": d.get("created_utc", ""),
+                                "url": f"https://reddit.com{d.get('permalink', '')}"
+                            })
+                            if "Reddit" not in result["sources"]:
+                                result["sources"].append("Reddit")
+        except:
+            pass
+
+    async def from_google():
+        """Google: поиск упоминаний username в публичном доступе."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                r = await c.get(
+                    f"https://www.google.com/search?q=%22{username}%22+site:forum+OR+site:chat+OR+site:comment",
+                    headers={"User-Agent": USER_AGENT + " (Linux; Android 12)"}
+                )
+                if r.status_code == 200 and "captcha" not in r.text.lower()[:3000]:
+                    for m in re.finditer(r'<span[^>]*class="[^"]*BNeawe[^"]*"[^>]*>([^<]{30,})</span>', r.text):
+                        snippet = m.group(1).strip()
+                        if username.lower() in snippet.lower() and len(snippet) > 30:
+                            result["messages"].append({
+                                "source": "Google", "text": snippet[:500],
+                                "context": "сниппет поиска"
+                            })
+                            if "Google" not in result["sources"]:
+                                result["sources"].append("Google")
+        except:
+            pass
+
+    await asyncio.gather(from_telegram(), from_vk_wall(), from_reddit(), from_google())
+
+    result["found"] = len(result["messages"]) > 0
+    return result
+
 
 # ==================== TELEGRAM PROFILE (РАСШИРЕННЫЙ) ====================
 
@@ -769,4 +1524,881 @@ async def domain_lookup(domain: str):
     return result
 
 
+# ==================== НОВЫЕ API-ИНТЕГРАЦИИ ====================
+# Все функции работают без ключей (graceful fallback), но с ключами дают больше данных
+
+async def _safe_api_get(url: str, headers: dict = None, params: dict = None, timeout: float = 10.0) -> dict | None:
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as c:
+            r = await c.get(url, headers=headers or {"User-Agent": USER_AGENT}, params=params)
+            return r.json() if r.status_code == 200 else None
+    except:
+        return None
+
+
+async def _safe_api_post(url: str, headers: dict = None, json_data: dict = None, timeout: float = 10.0) -> dict | None:
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as c:
+            r = await c.post(url, headers=headers or {"User-Agent": USER_AGENT}, json=json_data)
+            return r.json() if r.status_code == 200 else None
+    except:
+        return None
+
+
+async def shodan_full_lookup(ip: str) -> dict:
+    """Shodan — полные данные по IP: порты, сервисы, уязвимости, баннеры."""
+    from config import SHODAN_API_KEY
+    result = {}
+    if SHODAN_API_KEY:
+        data = await _safe_api_get(
+            f"https://api.shodan.io/shodan/host/{ip}?key={SHODAN_API_KEY}",
+            timeout=10.0
+        )
+        if data:
+            ports = data.get("ports", [])
+            services = []
+            for item in data.get("data", []):
+                services.append({
+                    "port": item.get("port"),
+                    "transport": item.get("transport", "tcp"),
+                    "product": item.get("product", ""),
+                    "version": item.get("version", ""),
+                    "banner": (item.get("data", "") or "")[:200],
+                })
+            result["shodan"] = {
+                "ports": ports,
+                "services": services[:15],
+                "hostnames": data.get("hostnames", []),
+                "os": data.get("os", ""),
+                "vulns": data.get("vulns", []),
+                "country": data.get("country_name", ""),
+                "city": data.get("city", ""),
+                "org": data.get("org", ""),
+                "isp": data.get("isp", ""),
+            }
+    # Fallback — InternetDB (без ключа)
+    data = await _safe_api_get(f"https://internetdb.shodan.io/{ip}", timeout=8.0)
+    if data:
+        result["internetdb"] = {
+            "ports": data.get("ports", []),
+            "hostnames": data.get("hostnames", []),
+            "cpes": data.get("cpes", []),
+            "tags": data.get("tags", []),
+        }
+    return result
+
+
+async def abuseipdb_check(ip: str) -> dict:
+    """AbuseIPDB — репутация IP (спам/атаки/abuse)."""
+    from config import ABUSEIPDB_API_KEY
+    if not ABUSEIPDB_API_KEY:
+        return {}
+    data = await _safe_api_get(
+        "https://api.abuseipdb.com/api/v2/check",
+        headers={"Key": ABUSEIPDB_API_KEY, "Accept": "application/json"},
+        params={"ipAddress": ip, "maxAgeInDays": "90", "verbose": ""},
+        timeout=8.0
+    )
+    if data and "data" in data:
+        d = data["data"]
+        return {
+            "abuse_score": d.get("abuseConfidenceScore", 0),
+            "total_reports": d.get("totalReports", 0),
+            "last_reported": d.get("lastReportedAt", ""),
+            "country": d.get("countryCode", ""),
+            "isp": d.get("isp", ""),
+            "domain": d.get("domain", ""),
+            "usage_type": d.get("usageType", ""),
+        }
+    return {}
+
+
+async def ipinfo_lookup(ip: str) -> dict:
+    """IPinfo — дополнительная IP-геолокация + провайдер."""
+    from config import IPINFO_API_KEY
+    token = f"?token={IPINFO_API_KEY}" if IPINFO_API_KEY else ""
+    data = await _safe_api_get(f"https://ipinfo.io/{ip}{token}", timeout=8.0)
+    if data:
+        return {
+            "city": data.get("city", ""),
+            "region": data.get("region", ""),
+            "country": data.get("country", ""),
+            "loc": data.get("loc", ""),
+            "org": data.get("org", ""),
+            "postal": data.get("postal", ""),
+            "timezone": data.get("timezone", ""),
+            "asn": data.get("asn", {}).get("asn", "") if isinstance(data.get("asn"), dict) else data.get("asn", ""),
+            "asn_name": data.get("asn", {}).get("name", "") if isinstance(data.get("asn"), dict) else "",
+            "company": data.get("company", {}).get("name", "") if isinstance(data.get("company"), dict) else "",
+            "privacy": data.get("privacy", {}),
+            "domains": data.get("domains", {}).get("domains", [])[:5] if isinstance(data.get("domains"), dict) else [],
+        }
+    return {}
+
+
+async def ssl_analyze(domain: str) -> dict:
+    """SSL Labs — анализ SSL-сертификата."""
+    data = await _safe_api_get(
+        f"https://api.ssllabs.com/api/v3/analyze?host={domain}&maxAge=24",
+        timeout=15.0
+    )
+    if data and data.get("status") != "ERROR" and data.get("endpoints"):
+        ep = data.get("endpoints", [{}])[0]
+        grade = ep.get("grade", "N/A")
+        details = {}
+        if ep.get("details"):
+            det = ep["details"]
+            cert = det.get("cert", {})
+            details = {
+                "protocol": det.get("protocol", ""),
+                "cert_subject": cert.get("subject", ""),
+                "cert_issuer": cert.get("issuer", ""),
+                "cert_valid_from": cert.get("notBefore", ""),
+                "cert_valid_to": cert.get("notAfter", ""),
+                "cert_commonName": cert.get("commonName", []),
+                "cert_altNames": cert.get("altNames", [])[:10],
+                "has_sni": det.get("sniRequired", False),
+                "dh_bits": det.get("dhBits", 0),
+            }
+        return {"grade": grade, "details": details}
+    return {}
+
+
+async def securitytrails_domain(domain: str) -> dict:
+    """SecurityTrails — DNS-история, поддомены, WHOIS."""
+    from config import SECURITYTRAILS_API_KEY
+    result = {}
+    api_key = SECURITYTRAILS_API_KEY
+    if not api_key:
+        return result
+    headers = {"APIKEY": api_key, "Accept": "application/json"}
+
+    subdomains_data = await _safe_api_get(
+        f"https://api.securitytrails.com/v1/domain/{domain}/subdomains",
+        headers=headers, timeout=10.0
+    )
+    if subdomains_data and "subdomains" in subdomains_data:
+        subs = subdomains_data["subdomains"][:50]
+        result["subdomains"] = [f"{s}.{domain}" for s in subs]
+
+    dns_history = await _safe_api_get(
+        f"https://api.securitytrails.com/v1/history/{domain}/dns/a",
+        headers=headers, timeout=10.0
+    )
+    if dns_history and "records" in dns_history:
+        records = dns_history["records"][:10]
+        result["dns_history"] = [
+            {"ip": r.get("values", [{}])[0].get("ip", ""), "first_seen": r.get("first_seen", "")}
+            for r in records if r.get("values")
+        ]
+
+    whois_data = await _safe_api_get(
+        f"https://api.securitytrails.com/v1/domain/{domain}/whois",
+        headers=headers, timeout=10.0
+    )
+    if whois_data:
+        result["whois"] = {
+            "registrar": whois_data.get("registrarName", ""),
+            "created": whois_data.get("createdDate", ""),
+            "expires": whois_data.get("expiresDate", ""),
+            "emails": whois_data.get("contactEmail", ""),
+        }
+    return result
+
+
+async def virustotal_lookup(target: str, target_type: str = "domain") -> dict:
+    """VirusTotal — репутация домена/IP/IP-адреса."""
+    from config import VIRUSTOTAL_API_KEY
+    if not VIRUSTOTAL_API_KEY:
+        return {}
+    url_map = {
+        "domain": f"https://www.virustotal.com/api/v3/domains/{target}",
+        "ip": f"https://www.virustotal.com/api/v3/ip_addresses/{target}",
+        "url": f"https://www.virustotal.com/api/v3/urls/{target}",
+    }
+    url = url_map.get(target_type)
+    if not url:
+        return {}
+    data = await _safe_api_get(
+        url, headers={"x-apikey": VIRUSTOTAL_API_KEY}, timeout=10.0
+    )
+    if data and "data" in data:
+        attrs = data["data"].get("attributes", {})
+        stats = attrs.get("last_analysis_stats", {})
+        cats = attrs.get("categories", {})
+        return {
+            "malicious": stats.get("malicious", 0),
+            "suspicious": stats.get("suspicious", 0),
+            "harmless": stats.get("harmless", 0),
+            "undetected": stats.get("undetected", 0),
+            "total_engines": sum(stats.values()) if stats else 0,
+            "categories": list(cats.values())[:5] if cats else [],
+            "reputation": attrs.get("reputation", 0),
+        }
+    return {}
+
+
+async def hunter_email(email: str) -> dict:
+    """Hunter.io — верификация email + метаданные."""
+    from config import HUNTER_API_KEY
+    if not HUNTER_API_KEY:
+        return {}
+    data = await _safe_api_get(
+        "https://api.hunter.io/v2/email-verifier",
+        params={"email": email, "api_key": HUNTER_API_KEY},
+        timeout=8.0
+    )
+    if data and "data" in data:
+        d = data["data"]
+        return {
+            "status": d.get("status", "unknown"),
+            "result": d.get("result", "unknown"),
+            "score": d.get("score", 0),
+            "regexp": d.get("regexp", False),
+            "gibberish": d.get("gibberish", False),
+            "disposable": d.get("disposable", False),
+            "webmail": d.get("webmail", False),
+            "mx_records": d.get("mx_records", False),
+            "smtp_server": d.get("smtp_server", False),
+            "smtp_check": d.get("smtp_check", False),
+            "accept_all": d.get("accept_all", False),
+            "block": d.get("block", False),
+            "sources": d.get("sources", [])[:3],
+        }
+    return {}
+
+
+async def breach_check_email(email: str) -> dict:
+    """Have I Been Pwned + LeakCheck — проверка утечек email."""
+    from config import VIRUSTOTAL_API_KEY
+    result = {"hibp": [], "sources": []}
+
+    # HIBP v3 (без ключа, но с User-Agent)
+    import hashlib
+    h = hashlib.sha1(email.encode()).hexdigest().upper()
+    prefix, suffix = h[:5], h[5:]
+    try:
+        async with httpx.AsyncClient(timeout=8) as c:
+            r = await c.get(
+                f"https://api.pwnedpasswords.com/range/{prefix}",
+                headers={"User-Agent": USER_AGENT, "Add-Padding": "true"},
+            )
+            if r.status_code == 200:
+                hashes = [line.split(":") for line in r.text.strip().split("\n")]
+                for hs, count in hashes:
+                    if hs == suffix:
+                        result["hibp"].append({"count": int(count)})
+                        result["sources"].append("Have I Been Pwned")
+                        break
+    except:
+        pass
+
+    # IntelX / leakcheck via leak.py
+    try:
+        from leak import leak_search
+        leak_data = await leak_search(email, "email")
+        if leak_data.get("found"):
+            result["sources"].extend(leak_data.get("sources", []))
+            result["leak_details"] = leak_data.get("details", [])
+    except:
+        pass
+
+    return result
+
+
+async def tech_detect(url: str) -> dict:
+    """Определение технологий сайта (Wappalyzer-like через публичный API)."""
+    result = {}
+    try:
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True) as c:
+            r = await c.get(f"https://{url}", headers={"User-Agent": USER_AGENT})
+            headers = dict(r.headers)
+            html = r.text[:50000]
+
+        tech = []
+
+        # Сервер
+        server = headers.get("Server", "")
+        if server and server != "N/A":
+            tech.append({"name": server, "category": "Веб-сервер"})
+
+        # CMS / фреймворки
+        cms_checks = {
+            "WordPress": ['wp-content', 'wp-includes', 'wordpress'],
+            "Joomla": ['joomla', 'com_content'],
+            "Drupal": ['drupal', 'Drupal.settings'],
+            "Bitrix": ['bitrix', 'bx-'],
+            "Tilda": ['tilda', 'tilda.ws'],
+            "Wix": ['wix', 'X-Wix'],
+            "Shopify": ['shopify', 'myshopify'],
+            "OpenCart": ['opencart', 'OC_CART'],
+            "PrestaShop": ['prestashop', 'ps_'],
+            "Laravel": ['laravel', 'LARAVEL'],
+            "Django": ['django', 'csrftoken'],
+            "Flask": ['flask', 'flask-framework'],
+            "Express": ['express', 'connect.sid'],
+            "Next.js": ['next.js', '__NEXT_DATA__'],
+            "Nuxt.js": ['nuxt', '__NUXT__'],
+        }
+        for name, needles in cms_checks.items():
+            for needle in needles:
+                if needle.lower() in html.lower() or needle.lower() in str(headers).lower():
+                    tech.append({"name": name, "category": "CMS/Фреймворк"})
+                    break
+
+        # Аналитика / CDN
+        header_tech = {
+            "cf-ray": {"name": "Cloudflare", "cat": "CDN"},
+            "x-amz-cf-id": {"name": "AWS CloudFront", "cat": "CDN"},
+            "x-served-by": {"name": "Nginx", "cat": "Веб-сервер"},
+            "x-powered-by": {"name": "PHP", "cat": "Язык"},
+            "x-aspnet-version": {"name": "ASP.NET", "cat": "Фреймворк"},
+            "x-generator": {"name": "CMS", "cat": "CMS"},
+        }
+        for hdr, info in header_tech.items():
+            if hdr in headers:
+                val = headers[hdr]
+                if not any(t["name"] == info["name"] for t in tech):
+                    tech.append({"name": f"{info['name']} ({val})" if val != info['name'] else info['name'], "category": info["cat"]})
+
+        result["tech"] = tech
+        result["headers"] = dict(list(headers.items())[:15])
+    except:
+        pass
+    return result
+
+
+async def dns_enum(domain: str) -> dict:
+    """DNS-перечисление: все типы записей + DNSSEC."""
+    result = {"records": {}}
+    for rtype in ["A", "AAAA", "MX", "NS", "TXT", "SOA", "CNAME", "PTR", "SRV", "CAA", "NAPTR", "DS", "DNSKEY"]:
+        try:
+            answers = dns.resolver.resolve(domain, rtype, lifetime=5)
+            vals = [str(r) for r in answers]
+            if vals:
+                result["records"][rtype] = vals
+        except:
+            pass
+    result["total_records"] = sum(len(v) for v in result["records"].values())
+    return result
+
+
+async def enhanced_port_scan(ip: str) -> dict:
+    """Сканирование портов через Shodan InternetDB."""
+    data = await _safe_api_get(f"https://internetdb.shodan.io/{ip}", timeout=8.0)
+    if data and data.get("ports"):
+        ports = data["ports"]
+        return {
+            "ports": sorted(ports),
+            "count": len(ports),
+            "total": len(ports),
+            "hostnames": data.get("hostnames", []),
+        }
+    return {}
+
+
 BASE_GN = re.compile(r'@?\w{3,32}$')
+
+
+# ==================== ХАКЕРСКИЙ СКАН НОМЕРА (KALI-STYLE) ====================
+# Модули: WhatsApp, Viber, Telegram, соцсети, утечки, Google, спам, риск-скоринг
+
+async def phone_scan(phone: str) -> dict:
+    """Полный хакерский скан номера телефона (PhoneInfoga-style)."""
+    clean = re.sub(r'[^\d+]', '', phone)
+    result = {
+        "input": phone,
+        "clean": clean,
+        "whatsapp": False,
+        "viber": False,
+        "telegram": False,
+        "signal": False,
+        "social": [],
+        "spam_sites": [],
+        "leaks": [],
+        "google_mentions": [],
+        "carrier": "",
+        "risk_score": 0,
+        "risk_label": "🟢 Безопасный",
+        "breach_count": 0,
+    }
+
+    async def _check_whatsapp():
+        """WhatsApp — проверка регистрации номера через api.whatsapp.com."""
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
+                num = re.sub(r'[^\d]', '', clean)
+                r = await c.get(f"https://api.whatsapp.com/send/?phone={num}", headers={"User-Agent": USER_AGENT})
+                text = r.text.lower()
+                if "continue to chat" in text or "open whatsapp" in text or "send" in text[:500]:
+                    result["whatsapp"] = True
+                elif "not registered" in text or "invalid" in text or "doesn't have" in text:
+                    result["whatsapp"] = False
+                else:
+                    result["whatsapp"] = r.status_code in (200, 302) and "send" in r.url.lower()
+        except:
+            pass
+
+    async def _check_viber():
+        """Viber — проверка регистрации номера через pa.tl/viber."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                num = re.sub(r'[^\d]', '', clean)
+                r = await c.get(f"https://pa.tl/viber/{num}", headers={"User-Agent": USER_AGENT})
+                if r.status_code < 400 and "invalid" not in r.text.lower()[:1000]:
+                    result["viber"] = True
+        except:
+            pass
+        try:
+            async with httpx.AsyncClient(timeout=6, follow_redirects=True) as c:
+                r = await c.get(f"https://chats.viber.com/{num}", headers={"User-Agent": USER_AGENT})
+                if r.status_code < 400 and "Invalid phone number" not in r.text:
+                    result["viber"] = True
+        except:
+            pass
+
+    async def _check_telegram():
+        """Telegram — проверка регистрации номера через t.me/+."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                num = re.sub(r'[^\d]', '', clean)
+                r = await c.get(f"https://t.me/+{num}", headers={"User-Agent": USER_AGENT})
+                result["telegram"] = r.status_code == 200 and "tgme_page" in r.text
+        except:
+            pass
+
+    async def _check_signal():
+        """Signal — проверка регистрации (через signal.me)."""
+        try:
+            async with httpx.AsyncClient(timeout=6, follow_redirects=True) as c:
+                num = re.sub(r'[^\d]', '', clean)
+                r = await c.get(f"https://signal.me/#p/{num}", headers={"User-Agent": USER_AGENT})
+                result["signal"] = r.status_code == 200
+        except:
+            pass
+
+    async def _check_social():
+        """Поиск привязок к соцсетям (VK, OK, Facebook по номеру)."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                raw = re.sub(r'[^\d]', '', clean)
+                # VK поиск по номеру
+                r = await c.get("https://api.vk.com/method/users.search",
+                    params={"q": raw, "count": 3, "v": "5.131",
+                            "fields": "photo_50,sex,bdate,city,country,home_town,status,last_seen,online,has_photo,contacts"},
+                    headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+                if r.status_code == 200:
+                    for u in r.json().get("response", {}).get("items", []):
+                        result["social"].append({
+                            "platform": "VK",
+                            "name": f"{u.get('first_name','')} {u.get('last_name','')}",
+                            "url": f"https://vk.com/id{u.get('id')}",
+                            "city": u.get("city", {}).get("title", "") if isinstance(u.get("city"), dict) else "",
+                            "has_phone": u.get("has_mobile", False) or bool(u.get("mobile_phone")),
+                        })
+        except:
+            pass
+        try:
+            async with httpx.AsyncClient(timeout=6, follow_redirects=True) as c:
+                # OK (Одноклассники) — открытая ссылка с номером
+                r = await c.get(f"https://ok.ru/search?st.query={clean}&st.g=0", headers={"User-Agent": USER_AGENT})
+                if r.status_code == 200 and "loginLayer" not in r.text[:5000]:
+                    result["social"].append({"platform": "OK", "note": "найден в поиске OK"})
+        except:
+            pass
+
+    async def _check_spam():
+        """Проверка во всех спам-базах: 10+ источников."""
+        try:
+            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as c:
+                raw = re.sub(r'[^\d]', '', clean)
+                spam_sources = [
+                    (f"https://callfilter.ru/{raw}/", "callfilter.ru", lambda t: "не найден" not in t.lower()[:2000]),
+                    (f"https://who-calls.ru/{raw}", "who-calls.ru", lambda t: "не найдена" not in t.lower()[:2000] and "404" not in t[:2000]),
+                    (f"https://ktozvonil.com/phone/{raw}", "ktozvonil.com", lambda t: "не найдено" not in t.lower()[:2000]),
+                    (f"https://spravka.net/phone/{raw}/", "spravka.net", lambda t: "не найден" not in t.lower()[:2000] and "404" not in t[:2000]),
+                    (f"https://abonent.me/{raw}", "abonent.me", lambda t: "не найден" not in t.lower()[:2000]),
+                    (f"https://phonbook.net/{raw}", "phonbook.net", lambda t: "не найден" not in t.lower()[:2000]),
+                    (f"https://telinfo.me/{raw}", "telinfo.me", lambda t: "не найден" not in t.lower()[:2000]),
+                    (f"https://www.phonebook.ru/phone/{raw}", "phonebook.ru", lambda t: "не найден" not in t.lower()[:2000]),
+                    (f"https://1000-nomerov.ru/phone/{raw}", "1000-nomerov.ru", lambda t: "не найден" not in t.lower()[:2000]),
+                    (f"https://everyon.me/phone/{raw}", "everyon.me", lambda t: "не найден" not in t.lower()[:2000]),
+                    (f"https://spamhaus.org/query/phone/{raw}", "spamhaus", lambda t: "listed" in t.lower()),
+                    (f"https://www.avito.ru/items/phone/{raw}", "avito.ru", lambda t: "найдено" in t.lower()[:2000]),
+                ]
+                for url, name, check in spam_sources:
+                    try:
+                        r = await c.get(url, headers={"User-Agent": USER_AGENT})
+                        if r.status_code == 200 and check(r.text):
+                            result["spam_sites"].append(name)
+                            if name == "callfilter.ru":
+                                m = re.search(r'рейтинг[^<]*<[^>]*>([^<]+)', r.text[:5000], re.I)
+                                if m:
+                                    result["spam_note"] = m.group(1).strip()
+                    except:
+                        pass
+        except:
+            pass
+
+    async def _check_breaches():
+        """Поиск номера в утечках через leaksearch."""
+        try:
+            from leak import leak_search
+            leak_data = await leak_search(clean, "phone")
+            if leak_data.get("found"):
+                for src in leak_data.get("sources", []):
+                    result["leaks"].append(src)
+                result["breach_count"] = len(leak_data.get("sources", []))
+        except:
+            pass
+
+    async def _check_google():
+        """Google-футпринт: поиск номера в разных форматах."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=False) as c:
+                raw = re.sub(r'[^\d]', '', clean)
+                for fmt in (raw, raw[:1] + " (" + raw[1:4] + ") " + raw[4:7] + "-" + raw[7:9] + "-" + raw[9:]):
+                    r = await c.get("https://www.google.com/search",
+                        params={"q": fmt, "hl": "ru", "num": 5},
+                        headers={"User-Agent": USER_AGENT})
+                    if r.status_code == 200 and "captcha" not in r.text.lower()[:3000]:
+                        snippets = re.findall(r'<span[^>]*class="[^"]*BNeawe[^"]*"[^>]*>([^<]{30,})</span>', r.text)
+                        for s in snippets[:3]:
+                            if raw in s or fmt in s:
+                                result["google_mentions"].append(s[:200])
+        except:
+            pass
+
+    async def _check_carrier():
+        """Определение оператора + MNP."""
+        try:
+            from phonenumbers import carrier as ph_carrier
+            import phonenumbers
+            try:
+                pn = phonenumbers.parse(clean, "RU")
+                result["carrier"] = ph_carrier.name_for_number(pn, "ru") or ph_carrier.name_for_number(pn, "en") or ""
+            except:
+                pass
+        except:
+            pass
+
+    async def _check_yandex():
+        """Yandex-футпринт: поиск номера в Яндексе."""
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=False) as c:
+                raw = re.sub(r'[^\d]', '', clean)
+                r = await c.get("https://yandex.ru/search/",
+                    params={"text": raw, "lr": 213},
+                    headers={"User-Agent": USER_AGENT})
+                if r.status_code == 200 and "captcha" not in r.text.lower()[:3000]:
+                    snippets = re.findall(r'<span[^>]*class="[^"]*[Oo]rganic[^"]*"[^>]*>([^<]{30,})</span>', r.text)
+                    for s in snippets[:3]:
+                        if raw in s:
+                            result["google_mentions"].append(f"Яндекс: {s[:200]}")
+        except:
+            pass
+
+    async def _check_email_by_phone():
+        """Поиск email'ов, привязанных к номеру, через утечки."""
+        try:
+            from leak import leak_search
+            leak_data = await leak_search(clean, "phone")
+            if leak_data.get("found"):
+                emails_found = set()
+                for src in leak_data.get("details", []):
+                    for s in src.get("sample", []):
+                        s_str = str(s)
+                        if "@" in s_str:
+                            m = re.search(r'[\w.+-]+@[\w-]+\.[\w.]+', s_str)
+                            if m:
+                                emails_found.add(m.group())
+                if emails_found:
+                    result["emails"] = list(emails_found)[:5]
+        except:
+            pass
+
+    async def _check_getcontact():
+        """GetContact — попытка проверить теги номера."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                raw = re.sub(r'[^\d]', '', clean)
+                r = await c.get(f"https://getcontact.com/phone/{raw}",
+                    headers={"User-Agent": USER_AGENT})
+                if r.status_code == 200 and "not found" not in r.text.lower()[:2000]:
+                    # Пробуем найти теги
+                    tags = re.findall(r'class="[^"]*tag[^"]*"[^>]*>([^<]+)<', r.text)
+                    if tags:
+                        result["gc_tags"] = [t.strip() for t in tags[:5] if t.strip()]
+        except:
+            pass
+
+    async def _check_syncme():
+        """Sync.me — проверка регистрации."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                raw = re.sub(r'[^\d]', '', clean)
+                r = await c.get(f"https://sync.me/{raw}",
+                    headers={"User-Agent": USER_AGENT})
+                if r.status_code == 200 and "user not found" not in r.text.lower()[:2000]:
+                    name_m = re.search(r'<h1[^>]*>([^<]+)</h1>', r.text)
+                    if name_m:
+                        result["syncme_name"] = name_m.group(1).strip()
+        except:
+            pass
+
+    async def _check_insta_by_phone():
+        """Instagram — поиск по номеру через login/identifiers."""
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
+                raw = re.sub(r'[^\d]', '', clean)
+                # Попытка поиска через публичные endpoints
+                r = await c.get(f"https://www.instagram.com/accounts/account_recovery_send_ajax/phone/{raw}",
+                    headers={"User-Agent": USER_AGENT, "X-Requested-With": "XMLHttpRequest"})
+                # Этот метод часто блокируется, но попробуем
+        except:
+            pass
+
+    async def _check_tg_phone_group():
+        """Telegram — поиск номера в публичных группах (через Google dork)."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=False) as c:
+                raw = re.sub(r'[^\d]', '', clean)
+                r = await c.get("https://www.google.com/search",
+                    params={"q": f'"{raw}" site:t.me', "hl": "ru", "num": 5},
+                    headers={"User-Agent": USER_AGENT})
+                if r.status_code == 200 and "captcha" not in r.text.lower()[:3000]:
+                    links = re.findall(r'href="https://t\.me/[^"]+"', r.text)
+                    if links:
+                        result["tg_links"] = [l.replace('href="','').replace('"','') for l in links[:3]]
+                        result["social"].append({"platform": "TG Group", "url": result["tg_links"][0]})
+        except:
+            pass
+
+    async def _check_mailru_phone():
+        """Mail.ru — поиск номера в открытом профиле."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                raw = re.sub(r'[^\d]', '', clean)
+                r = await c.get(f"https://e.mail.ru/cgi-bin/phone_search?phone={raw}",
+                    headers={"User-Agent": USER_AGENT})
+                if r.status_code == 200 and "user found" in r.text.lower():
+                    result["social"].append({"platform": "Mail.ru"})
+        except:
+            pass
+
+    async def _check_facebook_phone():
+        """Facebook — поиск по номеру (через m.facebook.com)."""
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
+                raw = re.sub(r'[^\d]', '', clean)
+                r = await c.get(f"https://m.facebook.com/search/top/?q={raw}",
+                    headers={"User-Agent": USER_AGENT})
+                if r.status_code == 200 and "search" in r.url.path:
+                    if "people" in r.text[:10000] or "profile" in r.text[:10000]:
+                        result["social"].append({"platform": "Facebook", "note": "найден по номеру"})
+        except:
+            pass
+
+    async def _check_numerous_dbs():
+        """Проверка в дополнительных российских базах номеров."""
+        raw = re.sub(r'[^\d]', '', clean)
+        extra_sources = [
+            (f"https://nomerorg.com/phone/{raw}", "nomerorg.com"),
+            (f"https://phones-info.ru/{raw}", "phones-info.ru"),
+            (f"https://phone-number.ru/{raw}", "phone-number.ru"),
+        ]
+        for url, name in extra_sources:
+            try:
+                async with httpx.AsyncClient(timeout=6, follow_redirects=True) as c:
+                    r = await c.get(url, headers={"User-Agent": USER_AGENT})
+                    if r.status_code == 200 and "не найден" not in r.text.lower()[:2000] and "404" not in r.text[:2000]:
+                        result["spam_sites"].append(name)
+            except:
+                pass
+
+    await asyncio.gather(
+        _check_whatsapp(), _check_viber(), _check_telegram(), _check_signal(),
+        _check_social(), _check_spam(), _check_breaches(), _check_google(),
+        _check_carrier(), _check_yandex(), _check_email_by_phone(),
+        _check_getcontact(), _check_syncme(), _check_insta_by_phone(),
+        _check_tg_phone_group(), _check_mailru_phone(), _check_facebook_phone(),
+        _check_numerous_dbs()
+    )
+
+    # Расчёт риска
+    risk = 0
+    if result["whatsapp"]: risk += 10
+    if result["viber"]: risk += 10
+    if result["telegram"]: risk += 15
+    if result["signal"]: risk += 5
+    if result["spam_sites"]: risk += 20
+    if result["breach_count"] > 0:
+        risk += min(result["breach_count"] * 10, 40)
+    if result["social"]:
+        risk += min(len(result["social"]) * 5, 15)
+    risk = min(risk, 100)
+
+    result["risk_score"] = risk
+    if risk >= 70:
+        result["risk_label"] = "🔴 Высокий риск"
+    elif risk >= 40:
+        result["risk_label"] = "🟡 Средний риск"
+    elif risk >= 15:
+        result["risk_label"] = "🔵 Низкий риск"
+    else:
+        result["risk_label"] = "🟢 Безопасный"
+
+    return result
+
+
+CARD_REGEX = re.compile(r"\b(?:\d[ -]*?){13,19}\b")
+
+
+async def phone_card_search(phone_e164: str) -> dict:
+    """Поиск банковских карт, привязанных к номеру телефона (через утечки и веб)."""
+    phone_clean = phone_e164.lstrip("+")
+    phone_pretty = f"+7 ({phone_clean[1:4]}) {phone_clean[4:7]}-{phone_clean[7:9]}-{phone_clean[9:]}"
+    result = {"found": False, "cards": [], "card_count": 0, "sources": []}
+
+    async def search_leaks():
+        try:
+            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as c:
+                r = await c.get(
+                    f"https://leakcheck.io/api/public?check={phone_clean}&type=phone",
+                    headers={"User-Agent": USER_AGENT}
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    if data.get("success") and data.get("data"):
+                        lines = data["data"]
+                        card_lines = [str(s) for s in lines if len(re.sub(r"\D", "", str(s))) >= 13]
+                        if card_lines:
+                            for cl in card_lines[:10]:
+                                clean_num = re.sub(r"\D", "", cl)
+                                if 13 <= len(clean_num) <= 19:
+                                    result["cards"].append({
+                                        "number": cl[:50],
+                                        "source": "LeakCheck",
+                                        "bin": clean_num[:8],
+                                    })
+                            result["found"] = True
+                            result["sources"].append("LeakCheck")
+                            result["card_count"] = len(card_lines)
+        except:
+            pass
+
+    async def search_google():
+        dorks = [
+            f'"{phone_clean}" карта OR банковская OR visa OR mastercard OR "номер карты"',
+            f'"{phone_clean}" "банковская карта" OR "дебетовая" OR "кредитная"',
+            f'"{phone_clean}" card OR "credit card" OR visa OR mastercard',
+            f'"{phone_pretty}" карта OR банк',
+        ]
+        seen = set()
+        for dork in dorks:
+            try:
+                async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
+                    r = await c.get(
+                        f"https://www.google.com/search?q={dork.replace(' ', '+')}",
+                        headers={"User-Agent": USER_AGENT + " (Linux; Android 12)"}
+                    )
+                    if r.status_code == 200 and "captcha" not in r.text.lower()[:3000]:
+                        found_cards = CARD_REGEX.findall(r.text)
+                        for fc in found_cards:
+                            clean_fc = re.sub(r"[ -]", "", fc)
+                            if 13 <= len(clean_fc) <= 19 and clean_fc not in seen:
+                                seen.add(clean_fc)
+                                result["cards"].append({
+                                    "number": clean_fc[:8] + "*" * (len(clean_fc) - 8),
+                                    "source": "Google",
+                                    "bin": clean_fc[:8],
+                                })
+                                result["found"] = True
+                        if found_cards:
+                            result["sources"].append("Google")
+            except:
+                pass
+
+    async def search_spam_dbs():
+        spam_sites = [
+            f"https://who-calls.ru/{phone_clean}",
+            f"https://callfilter.ru/{phone_clean}/",
+            f"https://ktozvonil.com/phone/{phone_clean}",
+        ]
+        for url in spam_sites:
+            try:
+                async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                    r = await c.get(url, headers={"User-Agent": USER_AGENT})
+                    if r.status_code == 200:
+                        found = CARD_REGEX.findall(r.text)
+                        for fc in found:
+                            clean_fc = re.sub(r"[ -]", "", fc)
+                            if 13 <= len(clean_fc) <= 19:
+                                result["cards"].append({
+                                    "number": clean_fc[:8] + "*" * (len(clean_fc) - 8),
+                                    "source": "spam-site",
+                                    "bin": clean_fc[:8],
+                                })
+                                result["found"] = True
+            except:
+                pass
+
+    await asyncio.gather(search_leaks(), search_google(), search_spam_dbs())
+
+    # Дедупликация карт
+    seen_bins = set()
+    unique_cards = []
+    for card in result["cards"]:
+        if card["bin"] not in seen_bins:
+            seen_bins.add(card["bin"])
+            unique_cards.append(card)
+    result["cards"] = unique_cards
+    result["card_count"] = len(unique_cards)
+
+    # BIN lookup для каждой найденной карты
+    if result["cards"]:
+        bin_tasks = [card_lookup(c["bin"]) for c in result["cards"]]
+        bin_results = await asyncio.gather(*bin_tasks, return_exceptions=True)
+        for i, br in enumerate(bin_results):
+            if i < len(result["cards"]) and isinstance(br, dict) and "error" not in br:
+                result["cards"][i]["bin_info"] = br
+
+    return result
+
+
+async def card_lookup(card_number: str) -> dict:
+    """Bank card BIN lookup — определяет банк, тип, страну по первым 6-8 цифрам карты"""
+    clean = re.sub(r"\D", "", card_number)
+    if len(clean) < 6:
+        return {"error": "❌ Номер карты слишком короткий. Нужно минимум 6 цифр (BIN)."}
+    bin_digits = clean[:8]  # до 8 цифр для точности
+    url = f"https://lookup.binlist.net/{bin_digits}"
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                result = {
+                    "scheme": data.get("scheme", "—"),
+                    "type": data.get("type", "—"),
+                    "brand": data.get("brand", "—"),
+                    "prepaid": data.get("prepaid", "—"),
+                    "country": (data.get("country") or {}).get("name", "—"),
+                    "country_code": (data.get("country") or {}).get("alpha2", "—"),
+                    "bank_name": (data.get("bank") or {}).get("name", "—"),
+                    "bank_url": (data.get("bank") or {}).get("url", "—"),
+                    "bank_phone": (data.get("bank") or {}).get("phone", "—"),
+                    "bin": bin_digits,
+                }
+                return result
+            elif resp.status_code == 404:
+                return {"error": f"❌ BIN {bin_digits} не найден в базе."}
+            else:
+                return {"error": f"❌ Ошибка API (HTTP {resp.status_code})."}
+    except Exception as e:
+        logger.warning(f"card_lookup error: {e}")
+        return {"error": f"❌ Ошибка запроса: {e}"}

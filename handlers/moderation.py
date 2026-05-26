@@ -3,7 +3,8 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from utils.helpers import (
     is_admin, is_banned, is_muted, get_warns, add_warn,
-    ban_user, unban_user, mute_user, unmute_user, can_moderate, get_username_safe
+    ban_user, unban_user, mute_user, unmute_user, can_moderate, get_username_safe,
+    can_read_chats
 )
 from handlers.user import active_users, waiting_users
 import db
@@ -440,8 +441,9 @@ async def cmd_check(message: Message):
 
 @router.message(Command("chatlog"))
 async def cmd_chatlog(message: Message):
-    if not _check_access(message):
-        await message.answer("❌ Доступ запрещён.")
+    uid = message.from_user.id
+    if not can_read_chats(uid):
+        await message.answer("❌ Доступ только для разработчика или назначенных.")
         return
     parts = message.text.split()
     if len(parts) < 2:

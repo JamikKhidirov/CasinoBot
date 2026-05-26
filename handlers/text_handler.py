@@ -3,7 +3,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 from handlers.osint_handlers import osint_waiting, osint_text_handler
 from handlers.user import active_users, handle_chat_text
-from utils.helpers import is_banned, is_muted
+from utils.helpers import is_banned, is_muted, update_user_activity
 
 router = Router()
 
@@ -14,6 +14,10 @@ async def text_dispatcher(message: Message, state: FSMContext):
         return
 
     uid = message.from_user.id
+    uname = message.from_user.username
+
+    # Автообновление данных пользователя
+    update_user_activity(uid, username=uname)
 
     if message.chat.type != "private":
         return

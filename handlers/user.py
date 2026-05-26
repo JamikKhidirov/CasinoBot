@@ -2,7 +2,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 from utils.keyboards import main_kb
-from utils.helpers import is_banned, save_message, is_admin
+from utils.helpers import is_banned, save_message, is_admin, is_dev, update_user_activity
 from config import OWNER_ID
 import db
 import datetime
@@ -20,6 +20,7 @@ async def cmd_start(message: Message):
     db.cur.execute("INSERT OR IGNORE INTO users (user_id, username, joined_at, last_active) VALUES (?,?,?,?)",
                    (uid, uname, datetime.datetime.now().isoformat(), datetime.datetime.now().isoformat()))
     db.conn.commit()
+    update_user_activity(uid, username=uname)
     if is_banned(uid):
         await message.answer("⚠️ Вы забанены.")
         return
@@ -30,15 +31,18 @@ async def cmd_start(message: Message):
         await message.answer("🔍 Вы в поиске собеседника.")
         return
     show_chat = message.chat.type == "private"
-    show_osint = uid == OWNER_ID
+    show_osint = is_dev(uid)
+    show_admin = is_admin(uid)
     await message.answer(
         "👋 Добро пожаловать!" + ("\n🔍 OSINT-пробив — поиск информации" if show_osint else ""),
-        reply_markup=main_kb(show_chat=show_chat, show_osint=show_osint)
+        reply_markup=main_kb(show_chat=show_chat, show_osint=show_osint, show_admin=show_admin)
     )
 
 
 async def handle_chat_text(message: Message):
     uid = message.from_user.id
+    uname = message.from_user.username
+    update_user_activity(uid, username=uname)
     if uid not in active_users:
         await message.answer("👋 Нажмите /start для начала.")
         return
