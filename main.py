@@ -1,6 +1,8 @@
 import logging
 import sqlite3
+import os
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -16,7 +18,8 @@ from telegram.error import BadRequest
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BOT = "7042929053:AAEsz4mIBA6P2ZKoPRiMuad1UIdR8dS9TQE"
+load_dotenv()
+BOT = os.getenv("BOT_TOKEN") or "7042929053:AAEsz4mIBA6P2ZKoPRiMuad1UIdR8dS9TQE"
 
 # Хранилище данных: {user_id: chat_partner_id}
 active_users = {}
@@ -412,8 +415,9 @@ async def start_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if waiting_users and waiting_users[0] != user_id:
         partner_id = waiting_users.pop(0)
         if is_banned(partner_id):
-            waiting_users.append(user_id)
-            await update.callback_query.edit_message_text("🔎 Ищем собеседника...", reply_markup=None)
+            if user_id not in waiting_users:
+                waiting_users.append(user_id)
+            await update.callback_query.edit_message_text("🔎 Ищем собеседника...", reply_markup=cancel_search_keyboard)
             return
 
         active_users[user_id] = partner_id
@@ -1132,6 +1136,14 @@ async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Не удалось отправить сообщение об ошибке: {e}")
 
 
+# Обработка не-текстовых сообщений
+async def handle_non_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in active_users:
+        return
+    await update.message.reply_text("Бот поддерживает только текстовые сообщения. Отправьте текст.")
+
+
 # Запуск бота
 def main():
     try:
@@ -1164,6 +1176,7 @@ def main():
         application.add_handler(CallbackQueryHandler(cancel_search, pattern="cancel_search"))
         application.add_handler(CallbackQueryHandler(show_chat, pattern="^(show_last_|show_full_)"))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        application.add_handler(MessageHandler(~filters.TEXT & ~filters.COMMAND, handle_non_text))
         application.add_error_handler(error)
 
         application.run_polling(drop_pending_updates=True)
