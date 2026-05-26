@@ -1,7 +1,9 @@
 import asyncio
 import logging
+import sys
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
+from aiogram.exceptions import TelegramNetworkError
 import config
 from db import init_db, close_db
 from handlers.user import router as user_router
@@ -27,8 +29,10 @@ async def main():
     logging.basicConfig(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         level=logging.INFO,
-        filename="bot_errors.log",
-        encoding="utf-8",
+        handlers=[
+            logging.FileHandler("bot_errors.log", encoding="utf-8"),
+            logging.StreamHandler(sys.stdout),
+        ],
     )
     logger = logging.getLogger(__name__)
 
@@ -63,17 +67,29 @@ async def main():
     logger.info("Команды зарегистрированы")
 
     logger.info("Бот запущен")
-    try:
-        await dp.start_polling(bot, drop_pending_updates=True)
-    except Exception as e:
-        logger.critical(f"Ошибка запуска: {e}")
-        if "getaddrinfo failed" in str(e) or "Cannot connect to host api.telegram.org" in str(e):
-            logger.critical("Telegram API заблокирован. Используйте VPN.")
-            print("\n❌ Telegram API заблокирован в вашем регионе.")
-            print("📌 Включите VPN и перезапустите бота.\n")
-    finally:
-        await bot.session.close()
-        close_db()
+
+    retries = 0
+    max_retries = 10
+    while retries < max_retries:
+        try:
+            await dp.start_polling(bot, drop_pending_updates=True)
+            logger.info("Polling завершён (без ошибки)")
+            break
+        except TelegramNetworkError as e:
+            retries += 1
+            logger.warning(f"Ошибка сети ({retries}/{max_retries}): {e}")
+            if "getaddrinfo failed" in str(e) or "Cannot connect" in str(e):
+                print("\n❌ Telegram API заблокирован. Включите VPN.\n")
+            if retries >= max_retries:
+                logger.critical("Превышено число попыток. Завершение.")
+                break
+            await asyncio.sleep(5 * retries)
+        except Exception as e:
+            logger.critical(f"Неизвестная ошибка: {e}")
+            break
+
+    await bot.session.close()
+    close_db()
 
 
 if __name__ == "__main__":
