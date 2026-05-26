@@ -7,3 +7,5 @@ chat.db
 casino/chat.db
 casino/.env
 .env
+
+*.txt
