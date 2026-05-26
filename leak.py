@@ -9,6 +9,7 @@ SOURCES = {
     "emailrep": "https://emailrep.io/{}",
     "leakcheck": "https://leakcheck.io/api/public?check={}&type={}",
     "scylla": "https://scylla.so/api/search/{}",
+    "leaklookup": "https://leak-lookup.com/api/search",
 }
 
 
@@ -17,8 +18,6 @@ async def leak_search(query: str, search_type: str = "auto") -> dict:
     query = query.strip().lower()
     results = {"query": query, "found": False, "sources": [], "details": []}
 
-    tasks = []
-
     if search_type == "auto":
         if "@" in query:
             search_type = "email"
@@ -26,6 +25,8 @@ async def leak_search(query: str, search_type: str = "auto") -> dict:
             search_type = "phone"
         else:
             search_type = "username"
+
+    tasks = []
 
     if search_type == "email":
         tasks.append(_check_emailrep(query, results))
@@ -39,7 +40,7 @@ async def leak_search(query: str, search_type: str = "auto") -> dict:
         tasks.append(_check_leakcheck(query, "username", results))
 
     await asyncio.gather(*tasks)
-
+    logger.info(f"leak_search({search_type}): {query} -> found={results['found']}, sources={results['sources']}")
     return results
 
 
@@ -52,16 +53,25 @@ async def _check_emailrep(query: str, results: dict):
                 rep = data.get("reputation", "unknown")
                 suspicious = data.get("suspicious", False)
                 details = data.get("details", {})
+                credentials_leaked = details.get("credentials_leaked", False)
                 breaches = details.get("breaches", [])
-                if breaches:
+
+                items = []
+                if credentials_leaked:
+                    items.append("Credentials leaked")
+                for b in breaches[:10]:
+                    items.append(b.get("name", str(b)))
+
+                if items:
                     results["found"] = True
                     results["sources"].append("EmailRep.io")
                     results["details"].append({
                         "source": "EmailRep.io",
                         "reputation": rep,
                         "suspicious": suspicious,
-                        "breaches": [b.get("name", b) for b in breaches[:10]],
+                        "breaches": items,
                     })
+                    logger.info(f"emailrep: found {len(items)} issues for {query}")
     except Exception as e:
         logger.debug(f"emailrep check failed: {e}")
 
@@ -69,7 +79,8 @@ async def _check_emailrep(query: str, results: dict):
 async def _check_leakcheck(query: str, lt: str, results: dict):
     try:
         async with httpx.AsyncClient(timeout=10) as c:
-            r = await c.get(SOURCES["leakcheck"].format(query, lt), headers={"User-Agent": USER_AGENT})
+            url = SOURCES["leakcheck"].format(query, lt)
+            r = await c.get(url, headers={"User-Agent": USER_AGENT})
             if r.status_code == 200:
                 data = r.json()
                 if data.get("success") and data.get("data"):
@@ -81,7 +92,8 @@ async def _check_leakcheck(query: str, lt: str, results: dict):
                         results["details"].append({
                             "source": "LeakCheck",
                             "count": len(lines),
-                            "sample": sample,
+                            "sample": [str(s)[:100] for s in sample],
                         })
+                        logger.info(f"leakcheck: found {len(lines)} records for {query}")
     except Exception as e:
         logger.debug(f"leakcheck check failed: {e}")

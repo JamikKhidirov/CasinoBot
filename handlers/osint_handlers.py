@@ -263,28 +263,33 @@ async def osint_text_handler(message: Message):
     await message.answer("⏳ Выполняю поиск...")
 
     try:
-        if mode == "phone":
-            result = phone_lookup(text)
-            log_osint_query(uid, "phone", text)
-            formatted = _fmt_phone(result)
-        elif mode == "email":
-            result = await email_lookup(text)
-            log_osint_query(uid, "email", text)
-            formatted = _fmt_email(result)
-        elif mode == "username":
-            result = await username_lookup(text)
-            log_osint_query(uid, "username", text)
-            formatted = _fmt_username(result)
-        elif mode == "ip":
-            result = await ip_lookup(text)
-            log_osint_query(uid, "ip", text)
-            formatted = _fmt_ip(result)
-        elif mode == "domain":
-            result = await domain_lookup(text)
-            log_osint_query(uid, "domain", text)
-            formatted = _fmt_domain(result)
-        else:
-            formatted = "❌ Неизвестный тип поиска"
+            if mode == "phone":
+                result = phone_lookup(text)
+                log_osint_query(uid, "phone", text)
+                if "error" not in result and result.get("e164"):
+                    result["messengers"] = await check_messenger(result["e164"])
+                    result["leak"] = await leak_search(result["e164"], "phone")
+                formatted = _fmt_phone(result)
+            elif mode == "email":
+                result = await email_lookup(text)
+                log_osint_query(uid, "email", text)
+                if "error" not in result:
+                    result["leak"] = await leak_search(text, "email")
+                formatted = _fmt_email(result)
+            elif mode == "username":
+                result = await username_lookup(text)
+                log_osint_query(uid, "username", text)
+                formatted = _fmt_username(result)
+            elif mode == "ip":
+                result = await ip_lookup(text)
+                log_osint_query(uid, "ip", text)
+                formatted = _fmt_ip(result)
+            elif mode == "domain":
+                result = await domain_lookup(text)
+                log_osint_query(uid, "domain", text)
+                formatted = _fmt_domain(result)
+            else:
+                formatted = "❌ Неизвестный тип поиска"
     except Exception as e:
         formatted = f"❌ Ошибка: {e}"
 
