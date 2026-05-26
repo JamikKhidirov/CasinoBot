@@ -10,9 +10,12 @@ def get_username_safe(user_id: int) -> str:
     except: return "unknown"
 
 def is_admin(user_id: int) -> bool:
-    db.cur.execute("SELECT is_admin FROM users WHERE user_id = ?", (user_id,))
-    row = db.cur.fetchone()
-    return row is not None and row[0] == 1
+    try:
+        db.cur.execute("SELECT is_admin FROM users WHERE user_id = ?", (user_id,))
+        row = db.cur.fetchone()
+        return row is not None and row[0] == 1
+    except:
+        return False
 
 def is_banned(user_id: int) -> bool:
     now = datetime.datetime.now().isoformat()
