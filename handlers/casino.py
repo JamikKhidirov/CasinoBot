@@ -306,15 +306,6 @@ def bet_selection_kb(game_type: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def casino_admin_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👥 Список игроков", callback_data="casino_admin_players")],
-        [InlineKeyboardButton(text="📋 Запросы на пополнение", callback_data="casino_admin_pending")],
-        [InlineKeyboardButton(text="💰 Пополнить баланс", callback_data="casino_admin_add")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="casino_menu")],
-    ])
-
-
 @router.callback_query(F.data == "casino_menu")
 async def cb_casino_menu(call: CallbackQuery):
     user = await get_user(call.from_user.id)
