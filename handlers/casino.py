@@ -2026,6 +2026,9 @@ async def cb_roll_dice(call: CallbackQuery):
                 await call.answer("❌ Вы уже сделали бросок!", show_alert=True)
                 return
 
+            # Блокируем повторный бросок ещё до отправки кубика
+            game.results[call.from_user.id] = -1  # временная метка "бросает"
+
         config = GAMES_CONFIG[game.game_type]
         player_name = await get_username(call.from_user.id)
 
@@ -2097,6 +2100,8 @@ async def handle_game_emoji(message: Message):
             await message.answer("❌ Вы уже сделали бросок!")
             return
 
+        game.results[uid] = -1  # временная метка "бросает"
+
     config = GAMES_CONFIG[game.game_type]
     player_name = await get_username(uid)
 
@@ -2135,6 +2140,11 @@ async def handle_game_emoji(message: Message):
 
 
 async def process_dice_roll(game: GameRoom, player_id: int, dice_value: int):
+    if game.is_finished:
+        return
+    # Не перезаписываем реальный бросок (авто-бросок мог уже сохранить значение)
+    if game.results.get(player_id, -1) > 0:
+        return
     game.results[player_id] = dice_value
     player_name = await get_username(player_id)
     config = GAMES_CONFIG[game.game_type]
@@ -2168,7 +2178,7 @@ async def process_dice_roll(game: GameRoom, player_id: int, dice_value: int):
             )
             game.last_roll_message_id = result_msg.message_id
 
-            if len(game.results) == 2:
+            if len(game.results) == 2 and all(v > 0 for v in game.results.values()):
                 await determine_winner(game)
             else:
                 game.player1_turn = not game.player1_turn
@@ -2213,6 +2223,8 @@ async def send_turn_notification(game: GameRoom, next_player: int):
 
 async def determine_winner(game: GameRoom):
     try:
+        if game.is_finished:
+            return
         await asyncio.sleep(3)
 
         p1_score = game.results.get(game.player1, 0)
@@ -2440,11 +2452,12 @@ async def game_timeout(room_id: str, delay: int):
 
 async def auto_roll_dice(game: GameRoom):
     config = GAMES_CONFIG[game.game_type]
-    if game.player1 not in game.results:
+    # Игрок не кинул (нет в results или стоит заглушка -1)
+    if game.results.get(game.player1, -1) < 0:
         d1 = await get_bot().send_dice(game.chat_id, emoji=config["emoji"])
         game.results[game.player1] = d1.dice.value
         logger.info(f"🎲 Авто-бросок {game.game_type}: {await get_username(game.player1)} = {d1.dice.value}")
-    if game.player2 not in game.results:
+    if game.player2 and game.results.get(game.player2, -1) < 0:
         d2 = await get_bot().send_dice(game.chat_id, emoji=config["emoji"])
         game.results[game.player2] = d2.dice.value
         logger.info(f"🎲 Авто-бросок {game.game_type}: {await get_username(game.player2)} = {d2.dice.value}")
