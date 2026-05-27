@@ -981,7 +981,7 @@ async def cb_withdraw(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-@router.callback_query(F.data.startswith("withdraw_"))
+@router.callback_query(F.data.startswith("withdraw_"), ~F.data.startswith("withdraw_approve_"), ~F.data.startswith("withdraw_reject_"))
 async def cb_withdraw_preset(call: CallbackQuery, state: FSMContext):
     amount_str = call.data.split("_", 1)[1]
     if amount_str == "custom":

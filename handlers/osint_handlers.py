@@ -762,7 +762,7 @@ def _fmt_tech(data: dict) -> str:
 async def _execute_lookup(message: Message, mode: str, query: str):
     """Выполняет OSINT-поиск и отправляет результат."""
     uid = message.from_user.id
-    if uid != OWNER_ID:
+    if not is_dev(uid) and not is_admin(uid):
         await message.answer("❌ OSINT доступен только администраторам.")
         return
 
@@ -887,7 +887,7 @@ def _cmd_shortcut(mode: str, prompt: str, example: str):
     """Создаёт обработчик для /команда [аргументы]."""
     async def handler(message: Message, command: CommandObject):
         uid = message.from_user.id
-        if uid != OWNER_ID:
+        if not is_dev(uid) and not is_admin(uid):
             await message.answer("❌ OSINT доступен только администраторам.")
             return
         if command.args:
@@ -910,7 +910,7 @@ router.message.register(_cmd_shortcut("card", "💳 Введите номер к
 @router.message(Command("help"))
 async def cmd_help(message: Message):
     uid = message.from_user.id
-    show_osint = is_dev(uid)
+    show_osint = is_dev(uid) or is_admin(uid)
     is_adm = is_admin(uid)
     parts = ["<b>👋 Команды бота</b>\n"]
     if show_osint:
