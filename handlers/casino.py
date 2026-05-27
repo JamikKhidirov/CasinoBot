@@ -2230,8 +2230,8 @@ async def determine_winner(game: GameRoom):
                 final = "⏰ Игра отменена — никто не присоединился."
         else:
             if game.game_type == "футбол":
-                p1_score_goal = p1_score > 3
-                p2_score_goal = p2_score > 3
+                p1_score_goal = p1_score > 2
+                p2_score_goal = p2_score > 2
                 if p1_score_goal and p2_score_goal:
                     await update_balance(game.player1, game.bet, "refund")
                     await update_balance(game.player2, game.bet, "refund")
@@ -2247,8 +2247,8 @@ async def determine_winner(game: GameRoom):
                     await update_balance(game.player2, game.bet, "refund")
                     result_msg = "⚽ Оба промахнулись! Ничья — ставки возвращены."
             elif game.game_type == "баскетбол":
-                p1_basket = p1_score > 3
-                p2_basket = p2_score > 3
+                p1_basket = p1_score > 2
+                p2_basket = p2_score > 2
                 if p1_basket and p2_basket:
                     await update_balance(game.player1, game.bet, "refund")
                     await update_balance(game.player2, game.bet, "refund")
