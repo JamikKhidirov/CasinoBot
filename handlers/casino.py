@@ -2227,8 +2227,16 @@ async def determine_winner(game: GameRoom):
             return
         await asyncio.sleep(3)
 
-        p1_score = game.results.get(game.player1, 0)
-        p2_score = game.results.get(game.player2, 0) if game.player2 in game.results else None
+        p1_raw = game.results.get(game.player1, 0)
+        p2_raw = game.results.get(game.player2, 0) if game.player2 in game.results else None
+
+        # Дротики: вычитаем 1 (очки 0-5 вместо 1-6)
+        if game.game_type == "дротики":
+            p1_score = max(0, p1_raw - 1)
+            p2_score = max(0, p2_raw - 1) if p2_raw is not None else None
+        else:
+            p1_score = p1_raw
+            p2_score = p2_raw
 
         total_bet = game.bet * 2
         commission = int(total_bet * COMMISSION_RATE)
@@ -2330,19 +2338,21 @@ async def determine_winner(game: GameRoom):
                 finally:
                     await conn.close()
 
-            # Формируем строку результатов (Гол/Промах для футбола и баскетбола)
-            def score_label(score, game_type):
+            # Формируем строку результатов
+            def score_label(score, game_type, raw=None):
                 if game_type in ("футбол", "баскетбол"):
                     return "✅ Гол" if score > 2 else "❌ Промах"
+                if game_type == "дротики" and raw is not None:
+                    return f"{score} (🎯 {raw}−1)"
                 return str(score)
 
             # Логируем точные очки в консоль для отладки
-            logger.info(f"🏁 Итоги {game.game_type}: {await get_username(game.player1)}={p1_score}, {await get_username(game.player2)}={p2_score} (комната {game.room_id})")
+            logger.info(f"🏁 Итоги {game.game_type}: {await get_username(game.player1)}={p1_raw}, {await get_username(game.player2)}={p2_raw} (комната {game.room_id})")
 
             final = (
                 f"🎲 Результаты игры в {GAMES_CONFIG[game.game_type]['emoji']}:\n"
-                f"{await get_username(game.player1)}: {score_label(p1_score, game.game_type)}\n"
-                f"{await get_username(game.player2)}: {score_label(p2_score, game.game_type)}\n\n"
+                f"{await get_username(game.player1)}: {score_label(p1_score, game.game_type, p1_raw)}\n"
+                f"{await get_username(game.player2)}: {score_label(p2_score, game.game_type, p2_raw)}\n\n"
                 f"{result_msg}"
             )
 
