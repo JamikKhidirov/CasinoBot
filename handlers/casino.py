@@ -925,7 +925,7 @@ async def cmd_admin_add_balance(message: Message):
 
 @router.message(Command("выводы"))
 async def cmd_withdrawals(message: Message):
-    if not await has_perm(message.from_user.id, "approve_deposits"):
+    if not await has_perm(message.from_user.id, "approve_withdrawals"):
         await clean_reply(message, "❌ Доступ запрещён!")
         return
     conn = await get_db()
@@ -1074,21 +1074,26 @@ async def process_withdraw_card(message: Message, state: FSMContext):
 
     await state.clear()
 
-    # Notify admin
+    # Notify all users with approve_withdrawals permission
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"withdraw_approve_{withdraw_id}"),
          InlineKeyboardButton(text="❌ Отклонить", callback_data=f"withdraw_reject_{withdraw_id}")]
     ])
     username = await get_username(message.from_user.id)
-    await get_bot().send_message(
-        ADMIN_ID,
-        f"🆕 Запрос на вывод средств\n\n"
-        f"👤 Пользователь: {username}\n"
-        f"🆔 ID: {message.from_user.id}\n"
-        f"💵 Сумма: {amount} монет\n"
-        f"💳 Карта: {card_details}",
-        reply_markup=markup,
-    )
+    admins = await get_users_with_perm("approve_withdrawals")
+    for admin_id in admins:
+        try:
+            await get_bot().send_message(
+                admin_id,
+                f"🆕 Запрос на вывод средств\n\n"
+                f"👤 Пользователь: {username}\n"
+                f"🆔 ID: {message.from_user.id}\n"
+                f"💵 Сумма: {amount} монет\n"
+                f"💳 Карта: {card_details}",
+                reply_markup=markup,
+            )
+        except Exception:
+            pass
 
     await message.answer(
         f"✅ Запрос на вывод <b>{amount}</b> монет отправлен администратору.\n"
@@ -1099,7 +1104,7 @@ async def process_withdraw_card(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("withdraw_approve_"))
 async def cb_withdraw_approve(call: CallbackQuery):
-    if not await has_perm(call.from_user.id, "approve_deposits"):
+    if not await has_perm(call.from_user.id, "approve_withdrawals"):
         await call.answer("❌ Доступ запрещён!", show_alert=True)
         return
 
@@ -1118,28 +1123,30 @@ async def cb_withdraw_approve(call: CallbackQuery):
         user_id = row["user_id"]
         amount = row["amount"]
 
-        # Check balance again
+        # Check balance
         cursor2 = await conn.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
         user = await cursor2.fetchone()
         if not user or user["balance"] < amount:
             await call.answer("❌ Недостаточно средств у пользователя!", show_alert=True)
             return
 
-        await update_balance(user_id, -amount, "withdraw")
+        # Update status first, then deduct balance
         await conn.execute(
             "UPDATE withdraw_requests SET status = 'approved' WHERE id = ?",
             (withdraw_id,),
         )
         await conn.commit()
-
-        await get_bot().send_message(
-            user_id,
-            f"✅ Ваш запрос на вывод <b>{amount}</b> монет одобрен!\n"
-            f"Средства отправлены на указанную карту.",
-            parse_mode="HTML"
-        )
     finally:
         await conn.close()
+
+    await update_balance(user_id, -amount, "withdraw")
+
+    await get_bot().send_message(
+        user_id,
+        f"✅ Ваш запрос на вывод <b>{amount}</b> монет одобрен!\n"
+        f"Средства отправлены на указанную карту.",
+        parse_mode="HTML"
+    )
 
     await call.answer("✅ Вывод подтверждён!")
     try:
@@ -1150,7 +1157,7 @@ async def cb_withdraw_approve(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("withdraw_reject_"))
 async def cb_withdraw_reject(call: CallbackQuery):
-    if not await has_perm(call.from_user.id, "approve_deposits"):
+    if not await has_perm(call.from_user.id, "approve_withdrawals"):
         await call.answer("❌ Доступ запрещён!", show_alert=True)
         return
 
@@ -1359,6 +1366,7 @@ PERMISSIONS = {
     "view_stats": "📊 Просмотр статистики",
     "add_balance": "💰 Пополнение баланса",
     "approve_deposits": "📋 Одобрение запросов",
+    "approve_withdrawals": "💸 Вывод средств (одобрение)",
     "manage_games": "🎮 Управление играми",
 }
 
@@ -1395,6 +1403,22 @@ async def has_perm(user_id: int, permission: str) -> bool:
         await conn.close()
 
 
+async def get_users_with_perm(permission: str) -> list[int]:
+    """Return list of user IDs that have a given permission (including OWNER)."""
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT admin_id FROM admin_permissions WHERE permission = ?", (permission,)
+        )
+        rows = await cursor.fetchall()
+        result = [r["admin_id"] for r in rows]
+    finally:
+        await conn.close()
+    if ADMIN_ID not in result:
+        result.append(ADMIN_ID)
+    return result
+
+
 async def is_casino_admin(user_id: int) -> bool:
     if is_owner(user_id):
         return True
@@ -1420,6 +1444,7 @@ def casino_admin_kb(perms: Optional[list[str]] = None) -> InlineKeyboardMarkup:
         buttons.append([InlineKeyboardButton(text="💰 Пополнить баланс", callback_data="casino_admin_add")])
     if "approve_deposits" in perms:
         buttons.append([InlineKeyboardButton(text="📋 Запросы на пополнение", callback_data="casino_admin_pending")])
+    if "approve_withdrawals" in perms:
         buttons.append([InlineKeyboardButton(text="💸 Запросы на вывод", callback_data="casino_admin_withdrawals")])
     if "manage_admins" in perms:
         buttons.append([InlineKeyboardButton(text="👑 Управление админами", callback_data="casino_admin_manage")])
@@ -1568,7 +1593,7 @@ async def cb_casino_admin_pending(call: CallbackQuery):
 @router.callback_query(F.data == "casino_admin_withdrawals")
 async def cb_casino_admin_withdrawals(call: CallbackQuery):
     uid = call.from_user.id
-    if not await has_perm(uid, "approve_deposits"):
+    if not await has_perm(uid, "approve_withdrawals"):
         await call.answer(ADMIN_ERROR, show_alert=True)
         return
     conn = await get_db()
@@ -1619,7 +1644,7 @@ async def cb_casino_admin_withdrawals(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("admin_withdraw_reject_"))
 async def cb_admin_withdraw_reject(call: CallbackQuery):
-    if not await has_perm(call.from_user.id, "approve_deposits"):
+    if not await has_perm(call.from_user.id, "approve_withdrawals"):
         await call.answer("❌ Доступ запрещён!", show_alert=True)
         return
     withdraw_id = int(call.data.split("_", 3)[3])
