@@ -607,6 +607,7 @@ async def send_admin_notification(user_id: int, amount: int, deposit_id: int):
             f"🆔 ID: <code>{user_id}</code>\n"
             f"💵 Сумма: {amount} монет",
             reply_markup=markup,
+            parse_mode="HTML",
         )
     except Exception as e:
         logger.error(f"Ошибка при отправке уведомления админу: {e}")
@@ -693,7 +694,7 @@ async def process_payment_details(message: Message, state: FSMContext):
         reply_markup=markup,
     )
 
-    await message.answer(f"✅ Реквизиты отправлены пользователю (ID: <code>{user_id}</code>).")
+    await message.answer(f"✅ Реквизиты отправлены пользователю (ID: <code>{user_id}</code>).", parse_mode="HTML")
     try:
         await get_bot().delete_message(message.chat.id, message.message_id)
     except:
@@ -735,6 +736,7 @@ async def cb_user_paid(call: CallbackQuery):
         f"✅ Пользователь подтвердил оплату.\n"
         f"Проверьте свой счёт и подтвердите.",
         reply_markup=approve_markup,
+        parse_mode="HTML",
     )
 
     await call.message.edit_text("✅ Оплата подтверждена. Ожидайте проверки администратором.")
@@ -2239,6 +2241,7 @@ async def cb_casino_game_select(call: CallbackQuery):
         f"{cfg['emoji']} <b>{game_type.capitalize()}</b>\n\n"
         f"💰 Выберите ставку:",
         reply_markup=bet_selection_kb(game_type),
+        parse_mode="HTML",
     )
     await call.answer()
 
