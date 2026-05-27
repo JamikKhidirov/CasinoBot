@@ -2145,6 +2145,9 @@ async def process_dice_roll(game: GameRoom, player_id: int, dice_value: int):
     except Exception:
         pass
 
+    # Логируем результат броска в консоль
+    logger.info(f"🎲 Бросок в игре {game.game_type}: {player_name} = {dice_value} (комната {game.room_id})")
+
     wait_msg = await get_bot().send_message(game.chat_id, f"⏳ {player_name} {config['action']}, ожидаем результат...")
     game.last_roll_message_id = wait_msg.message_id
 
@@ -2157,8 +2160,8 @@ async def process_dice_roll(game: GameRoom, player_id: int, dice_value: int):
                 pass
 
             score_text = {
-                "⚽": f"{'⚽ ГОЛ!' if dice_value > 3 else '❌ Промах!'}",
-                "🏀": f"{'🏀 Попадание!' if dice_value > 3 else '❌ Промах!'}",
+                "⚽": f"{'⚽ ГОЛ!' if dice_value > 2 else '❌ Промах!'}",
+                "🏀": f"{'🏀 Попадание!' if dice_value > 2 else '❌ Промах!'}",
             }.get(config["emoji"], f"{dice_value}")
             result_msg = await get_bot().send_message(
                 game.chat_id, f"{player_name}: {score_text} {config['emoji']}"
@@ -2315,10 +2318,19 @@ async def determine_winner(game: GameRoom):
                 finally:
                     await conn.close()
 
+            # Формируем строку результатов (Гол/Промах для футбола и баскетбола)
+            def score_label(score, game_type):
+                if game_type in ("футбол", "баскетбол"):
+                    return "✅ Гол" if score > 2 else "❌ Промах"
+                return str(score)
+
+            # Логируем точные очки в консоль для отладки
+            logger.info(f"🏁 Итоги {game.game_type}: {await get_username(game.player1)}={p1_score}, {await get_username(game.player2)}={p2_score} (комната {game.room_id})")
+
             final = (
                 f"🎲 Результаты игры в {GAMES_CONFIG[game.game_type]['emoji']}:\n"
-                f"{await get_username(game.player1)}: {p1_score}\n"
-                f"{await get_username(game.player2)}: {p2_score}\n\n"
+                f"{await get_username(game.player1)}: {score_label(p1_score, game.game_type)}\n"
+                f"{await get_username(game.player2)}: {score_label(p2_score, game.game_type)}\n\n"
                 f"{result_msg}"
             )
 
@@ -2431,8 +2443,10 @@ async def auto_roll_dice(game: GameRoom):
     if game.player1 not in game.results:
         d1 = await get_bot().send_dice(game.chat_id, emoji=config["emoji"])
         game.results[game.player1] = d1.dice.value
+        logger.info(f"🎲 Авто-бросок {game.game_type}: {await get_username(game.player1)} = {d1.dice.value}")
     if game.player2 not in game.results:
         d2 = await get_bot().send_dice(game.chat_id, emoji=config["emoji"])
         game.results[game.player2] = d2.dice.value
+        logger.info(f"🎲 Авто-бросок {game.game_type}: {await get_username(game.player2)} = {d2.dice.value}")
 
     await determine_winner(game)
