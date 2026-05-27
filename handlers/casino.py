@@ -1538,6 +1538,8 @@ def casino_admin_kb(perms: Optional[list[str]] = None) -> InlineKeyboardMarkup:
         buttons.append([InlineKeyboardButton(text="💸 Запросы на вывод", callback_data="casino_admin_withdrawals")])
     if "manage_admins" in perms:
         buttons.append([InlineKeyboardButton(text="👑 Управление админами", callback_data="casino_admin_manage")])
+    if "create_promos" in perms:
+        buttons.append([InlineKeyboardButton(text="🎟 Промокоды", callback_data="casino_admin_promos")])
     buttons.append([InlineKeyboardButton(text="📖 Команды /admin", callback_data="casino_admin_help")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="casino_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -1762,6 +1764,102 @@ async def cb_admin_withdraw_reject(call: CallbackQuery):
     await cb_casino_admin_withdrawals(call)
 
 
+@router.callback_query(F.data == "casino_admin_promos")
+async def cb_casino_admin_promos(call: CallbackQuery):
+    uid = call.from_user.id
+    if not await has_perm(uid, "create_promos"):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Создать промокод", callback_data="promo_create")],
+        [InlineKeyboardButton(text="🗑 Удалить промокод", callback_data="promo_delete")],
+        [InlineKeyboardButton(text="📋 Список промокодов", callback_data="promo_list")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin")],
+    ])
+    await call.message.edit_text(
+        "🎟 <b>Управление промокодами</b>\n\n"
+        "┣ Коды активируются 1 раз на аккаунт\n"
+        "┣ Сумма зачисляется на баланс казино\n"
+        "┣ Промокоды не сгорают",
+        parse_mode="HTML", reply_markup=kb,
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "promo_create")
+async def cb_promo_create(call: CallbackQuery):
+    uid = call.from_user.id
+    if not await has_perm(uid, "create_promos"):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin_promos")],
+    ])
+    await call.message.edit_text(
+        "🎟 <b>Создание промокода</b>\n\n"
+        "Отправьте команду:\n"
+        "<code>/createpromo КОД СУММА</code>\n\n"
+        "Пример:\n"
+        "<code>/createpromo BONUS100 100</code>",
+        parse_mode="HTML", reply_markup=kb,
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "promo_delete")
+async def cb_promo_delete(call: CallbackQuery):
+    uid = call.from_user.id
+    if not await has_perm(uid, "create_promos"):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin_promos")],
+    ])
+    await call.message.edit_text(
+        "🎟 <b>Удаление промокода</b>\n\n"
+        "Отправьте команду:\n"
+        "<code>/deletepromo КОД</code>\n\n"
+        "Пример:\n"
+        "<code>/deletepromo BONUS100</code>",
+        parse_mode="HTML", reply_markup=kb,
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "promo_list")
+async def cb_promo_list(call: CallbackQuery):
+    uid = call.from_user.id
+    if not await has_perm(uid, "create_promos"):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    conn = await get_db()
+    try:
+        cursor = await conn.execute("SELECT * FROM promocodes ORDER BY created_at DESC")
+        promos = await cursor.fetchall()
+    finally:
+        await conn.close()
+    if not promos:
+        await call.message.answer("📋 Нет созданных промокодов.")
+        await call.answer()
+        return
+    lines = ["<b>📋 Промокоды:</b>\n"]
+    for p in promos:
+        conn2 = await get_db()
+        try:
+            cur2 = await conn2.execute(
+                "SELECT COUNT(*) as cnt FROM promo_activations WHERE code = ?", (p["code"],)
+            )
+            cnt_row = await cur2.fetchone()
+            activations = cnt_row["cnt"] if cnt_row else 0
+        finally:
+            await conn2.close()
+        lines.append(
+            f"┃ <code>{p['code']}</code> — {p['amount']} 🪙  |  активаций: {activations}"
+        )
+    await call.message.answer("\n".join(lines), parse_mode="HTML")
+    await call.answer()
+
+
 @router.callback_query(F.data == "casino_admin_add")
 async def cb_casino_admin_add(call: CallbackQuery):
     uid = call.from_user.id
@@ -1919,6 +2017,16 @@ async def cmd_add_admin(message: Message):
 
     await clean_reply(message, f"✅ Пользователь <code>{user_id}</code> добавлен в администраторы!\n"
                                f"Выдайте ему права: <code>/setperm {user_id} право</code>")
+
+    # устанавливаем админ-команды новому админу
+    try:
+        from aiogram.types import BotCommandScopeChat
+        import sys
+        main_mod = sys.modules.get("main")
+        if main_mod and hasattr(main_mod, "ADMIN_COMMANDS"):
+            await get_bot().set_my_commands(main_mod.ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=user_id))
+    except Exception:
+        pass
 
 
 @router.message(Command("removeadmin"))

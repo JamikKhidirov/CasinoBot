@@ -29,6 +29,7 @@ PUBLIC_COMMANDS = [
     BotCommand(command="football", description="⚽ Футбол [ставка]"),
     BotCommand(command="active", description="🕹 Активные игры"),
     BotCommand(command="unlock", description="🔓 Отменить свои игры"),
+    BotCommand(command="promo", description="🎟 Активировать промокод"),
 ]
 
 ADMIN_COMMANDS = [
@@ -108,6 +109,21 @@ async def main():
         try:
             await bot.set_my_commands(PUBLIC_COMMANDS, scope=BotCommandScopeDefault())
             await bot.set_my_commands(ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=OWNER_ID))
+            # также ставим админ-команды всем админам казино
+            try:
+                from handlers.casino import get_db
+                conn = await get_db()
+                cur = await conn.execute("SELECT admin_id FROM casino_admins")
+                admins = await cur.fetchall()
+                await conn.close()
+                for row in admins:
+                    if row["admin_id"] != OWNER_ID:
+                        try:
+                            await bot.set_my_commands(ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=row["admin_id"]))
+                        except Exception:
+                            pass
+            except Exception:
+                pass
             logger.info("Команды зарегистрированы")
             await dp.start_polling(bot, drop_pending_updates=True)      
             logger.info("Polling завершён (без ошибки)")
