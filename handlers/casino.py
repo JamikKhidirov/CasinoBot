@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import uuid
-from datetime import date, datetime
+from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -19,7 +19,6 @@ from config import OWNER_ID as ADMIN_ID
 COMMISSION_RATE = Decimal("0.1")
 DB_NAME = "casino.db"
 INITIAL_BALANCE = 1000
-DAILY_BONUS = 500
 
 _bot: Optional[Bot] = None
 
@@ -75,8 +74,7 @@ async def init_db():
                 username TEXT,
                 balance INTEGER DEFAULT 1000,
                 games_played INTEGER DEFAULT 0,
-                wins INTEGER DEFAULT 0,
-                last_bonus DATE
+                wins INTEGER DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS games (
                 room_id TEXT PRIMARY KEY,
@@ -120,6 +118,19 @@ async def init_db():
                 status TEXT DEFAULT 'pending',
                 created TEXT
             );
+            CREATE TABLE IF NOT EXISTS promocodes (
+                code TEXT PRIMARY KEY,
+                amount INTEGER NOT NULL,
+                created_by INTEGER,
+                created_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS promo_activations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                activated_at TEXT,
+                FOREIGN KEY (code) REFERENCES promocodes(code)
+            );
         """)
         await conn.commit()
     finally:
@@ -150,6 +161,29 @@ async def init_db():
         pass
     finally:
         await conn3.close()
+    # migration: add promocodes/promo_activations for existing DBs
+    conn4 = await get_db()
+    try:
+        await conn4.executescript("""
+            CREATE TABLE IF NOT EXISTS promocodes (
+                code TEXT PRIMARY KEY,
+                amount INTEGER NOT NULL,
+                created_by INTEGER,
+                created_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS promo_activations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                activated_at TEXT,
+                FOREIGN KEY (code) REFERENCES promocodes(code)
+            )
+        """)
+        await conn4.commit()
+    except:
+        pass
+    finally:
+        await conn4.close()
     # clean up stale pending deposit requests
     conn3 = await get_db()
     try:
@@ -260,9 +294,8 @@ def casino_menu_kb(user_id: Optional[int] = None) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🎮 Игры", callback_data="casino_games")],
         [InlineKeyboardButton(text="👤 Профиль", callback_data="casino_profile"),
          InlineKeyboardButton(text="🏆 Топ", callback_data="casino_top")],
-        [InlineKeyboardButton(text="🎁 Бонус", callback_data="casino_bonus"),
-         InlineKeyboardButton(text="🎲 Активные", callback_data="casino_active")],
-        [InlineKeyboardButton(text="🔓 Разблокировать", callback_data="casino_unlock")],
+        [InlineKeyboardButton(text="🎲 Активные", callback_data="casino_active"),
+         InlineKeyboardButton(text="🔓 Разблокировать", callback_data="casino_unlock")],
     ]
     if user_id and user_id == ADMIN_ID:
         buttons.append([InlineKeyboardButton(text="⚙️ Админка", callback_data="casino_admin")])
@@ -344,7 +377,6 @@ async def cb_casino_profile(call: CallbackQuery):
         f"┃ 💰 <b>Баланс:</b> {user['balance']} 🪙\n"
         f"┃ 🎮 <b>Сыграно игр:</b> {user['games_played']}\n"
         f"┃ 🏆 <b>Побед:</b> {user['wins']}\n"
-        f"┃ 📅 <b>Последний бонус:</b> {user['last_bonus'] or 'ещё не получал'}"
     )
     markup = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -376,46 +408,6 @@ async def cb_casino_top(call: CallbackQuery):
             medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "▫️"
             text += f"{medal} <b>{i}.</b> @{name}  →  {row['balance']} 🪙\n"
         await call.message.answer(text, parse_mode="HTML")
-    await call.answer()
-
-
-@router.callback_query(F.data == "casino_bonus")
-async def cb_casino_bonus(call: CallbackQuery):
-    user_id = call.from_user.id
-    user = await get_user(user_id)
-
-    if not user:
-        await create_user(call.from_user)
-        user = await get_user(user_id)
-
-    last_bonus_val = user["last_bonus"]
-    today_d = date.today()
-
-    if last_bonus_val:
-        try:
-            if isinstance(last_bonus_val, str):
-                last_date = datetime.strptime(last_bonus_val, "%Y-%m-%d").date()
-            else:
-                last_date = last_bonus_val
-            if today_d <= last_date:
-                await call.message.answer("💰 Вы уже получили свой сегодняшний бонус!")
-                await call.answer()
-                return
-        except (ValueError, TypeError) as e:
-            logger.error(f"Ошибка даты бонуса для {user_id}: {e}")
-
-    await update_balance(user_id, DAILY_BONUS, "bonus")
-    conn = await get_db()
-    try:
-        await conn.execute(
-            "UPDATE users SET last_bonus = ? WHERE user_id = ?",
-            (today_d.strftime("%Y-%m-%d"), user_id),
-        )
-        await conn.commit()
-    finally:
-        await conn.close()
-
-    await call.message.answer(f"🎉 Вы получили ежедневный бонус в размере {DAILY_BONUS} монет!")
     await call.answer()
 
 
@@ -491,7 +483,6 @@ async def cmd_profile(message: Message):
         f"┃ 💰 <b>Баланс:</b> {user['balance']} 🪙\n"
         f"┃ 🎮 <b>Сыграно игр:</b> {user['games_played']}\n"
         f"┃ 🏆 <b>Побед:</b> {user['wins']}\n"
-        f"┃ 📅 <b>Последний бонус:</b> {user['last_bonus'] or 'ещё не получал'}"
     )
     markup = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -1183,43 +1174,149 @@ async def cb_withdraw_reject(call: CallbackQuery):
         pass
 
 
-# ─── ───────────────────────────────────────────────────────────────────
-@router.message(Command("bonus"))
-async def cmd_daily_bonus(message: Message):
+# ─── Promo codes system ───────────────────────────────────────────────
+
+
+@router.message(Command("promo"))
+async def cmd_activate_promo(message: Message):
+    """Активировать промокод. Формат: /promo КОД"""
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.reply("❌ Укажите промокод. Пример: <code>/promo WELCOME100</code>", parse_mode="HTML")
+        return
+
+    code = parts[1].strip().upper()
     user_id = message.from_user.id
-    user = await get_user(user_id)
 
-    if not user:
-        await create_user(message.from_user)
-        user = await get_user(user_id)
+    conn = await get_db()
+    try:
+        cursor = await conn.execute("SELECT amount FROM promocodes WHERE code = ?", (code,))
+        promo = await cursor.fetchone()
+        if not promo:
+            await message.reply("❌ Промокод не найден.")
+            return
 
-    last_bonus_val = user["last_bonus"]
-    today_d = date.today()
+        amount = promo["amount"]
 
-    if last_bonus_val:
-        try:
-            if isinstance(last_bonus_val, str):
-                last_date = datetime.strptime(last_bonus_val, "%Y-%m-%d").date()
-            else:
-                last_date = last_bonus_val
-            if today_d <= last_date:
-                await message.reply("💰 Вы уже получили свой ежедневный бонус! Приходите завтра 🎁")
-                return
-        except (ValueError, TypeError) as e:
-            logger.error(f"Ошибка даты бонуса для {user_id}: {e}")
+        cursor = await conn.execute(
+            "SELECT 1 FROM promo_activations WHERE code = ? AND user_id = ?",
+            (code, user_id),
+        )
+        if await cursor.fetchone():
+            await message.reply("❌ Вы уже активировали этот промокод.")
+            return
+    finally:
+        await conn.close()
 
-    await update_balance(user_id, DAILY_BONUS, "bonus")
+    await update_balance(user_id, amount, "promo")
+
     conn = await get_db()
     try:
         await conn.execute(
-            "UPDATE users SET last_bonus = ? WHERE user_id = ?",
-            (today_d.strftime("%Y-%m-%d"), user_id),
+            "INSERT INTO promo_activations (code, user_id, activated_at) VALUES (?, ?, ?)",
+            (code, user_id, datetime.now().isoformat()),
         )
         await conn.commit()
     finally:
         await conn.close()
 
-    await message.reply(f"🎉 <b>Ежедневный бонус получен!</b>\n💰 +{DAILY_BONUS} 🪙 на ваш баланс!", parse_mode="HTML")
+    await message.reply(f"🎉 <b>Промокод активирован!</b>\n💰 +{amount} 🪙 на ваш баланс!", parse_mode="HTML")
+
+
+@router.message(Command("createpromo"))
+async def cmd_create_promo(message: Message):
+    if not is_owner(message.from_user.id) and not await has_perm(message.from_user.id, "create_promos"):
+        await clean_reply(message, "❌ Только разработчик или админ с правом create_promos может создавать промокоды!")
+        return
+
+    parts = message.text.split()
+    if len(parts) < 3:
+        await clean_reply(message, "❌ Формат: <code>/createpromo КОД сумма</code>\nПример: <code>/createpromo WELCOME 500</code>")
+        return
+
+    code = parts[1].strip().upper()
+    try:
+        amount = int(parts[2])
+    except ValueError:
+        await clean_reply(message, "❌ Сумма должна быть числом.")
+        return
+
+    if amount < 1:
+        await clean_reply(message, "❌ Сумма должна быть больше 0.")
+        return
+
+    conn = await get_db()
+    try:
+        cursor = await conn.execute("SELECT 1 FROM promocodes WHERE code = ?", (code,))
+        if await cursor.fetchone():
+            await clean_reply(message, f"❌ Промокод <code>{code}</code> уже существует.")
+            return
+        await conn.execute(
+            "INSERT INTO promocodes (code, amount, created_by, created_at) VALUES (?, ?, ?, ?)",
+            (code, amount, message.from_user.id, datetime.now().isoformat()),
+        )
+        await conn.commit()
+    finally:
+        await conn.close()
+
+    await clean_reply(message, f"✅ Промокод <code>{code}</code> на <b>{amount}</b> монет создан!")
+
+
+@router.message(Command("deletepromo"))
+async def cmd_delete_promo(message: Message):
+    if not is_owner(message.from_user.id) and not await has_perm(message.from_user.id, "create_promos"):
+        await clean_reply(message, "❌ Только разработчик может удалять промокоды!")
+        return
+
+    parts = message.text.split()
+    if len(parts) < 2:
+        await clean_reply(message, "❌ Формат: <code>/deletepromo КОД</code>")
+        return
+
+    code = parts[1].strip().upper()
+    conn = await get_db()
+    try:
+        await conn.execute("DELETE FROM promocodes WHERE code = ?", (code,))
+        await conn.commit()
+    finally:
+        await conn.close()
+
+    await clean_reply(message, f"✅ Промокод <code>{code}</code> удалён.")
+
+
+@router.message(Command("promo_list"))
+async def cmd_promo_list(message: Message):
+    if not is_owner(message.from_user.id) and not await has_perm(message.from_user.id, "create_promos"):
+        await clean_reply(message, "❌ Только разработчик может просматривать промокоды!")
+        return
+
+    conn = await get_db()
+    try:
+        cursor = await conn.execute("SELECT * FROM promocodes ORDER BY created_at DESC")
+        promos = await cursor.fetchall()
+    finally:
+        await conn.close()
+
+    if not promos:
+        await clean_reply(message, "📋 Нет созданных промокодов.")
+        return
+
+    lines = ["<b>📋 Промокоды:</b>\n"]
+    for p in promos:
+        conn2 = await get_db()
+        try:
+            cur2 = await conn2.execute(
+                "SELECT COUNT(*) as cnt FROM promo_activations WHERE code = ?", (p["code"],)
+            )
+            cnt_row = await cur2.fetchone()
+            activations = cnt_row["cnt"] if cnt_row else 0
+        finally:
+            await conn2.close()
+        lines.append(
+            f"┃ <b>{p['code']}</b> — {p['amount']} 🪙\n"
+            f"┃ └ Активаций: {activations} | Создан: {p['created_at']}"
+        )
+    await clean_reply(message, "\n\n".join(lines))
 
 
 @router.message(Command("топ"))
@@ -1335,7 +1432,6 @@ async def cmd_all_players(message: Message):
         chunk.append(
             f"👤 <code>{p['user_id']}</code> | {name}\n"
             f"💰 {p['balance']} | 🎮 {p['games_played']} | 🏆 {p['wins']}\n"
-            f"📅 Бонус: {p['last_bonus'] or 'нет'}\n"
             f"{'─' * 20}"
         )
         if len(chunk) == 10:
@@ -1360,6 +1456,7 @@ PERMISSIONS = {
     "add_balance": "💰 Пополнение баланса",
     "approve_deposits": "📋 Одобрение запросов",
     "approve_withdrawals": "💸 Вывод средств (одобрение)",
+    "create_promos": "🎟 Создание промокодов",
     "manage_games": "🎮 Управление играми",
 }
 
@@ -1760,7 +1857,10 @@ ADMIN_COMMANDS = {
     "/perms <id>": "🔑 Посмотреть права пользователя",
     "/игроки": "👥 Список всех игроков (право: view_players)",
     "/пополнить <id> <сумма>": "💰 Пополнить баланс (право: add_balance)",
-    "/выводы": "💸 Список запросов на вывод (право: approve_deposits)",
+    "/выводы": "💸 Список запросов на вывод (право: approve_withdrawals)",
+    "/createpromo <код> <сумма>": "🎟 Создать промокод (право: create_promos)",
+    "/deletepromo <код>": "🎟 Удалить промокод (право: create_promos)",
+    "/promo_list": "🎟 Список всех промокодов (право: create_promos)",
 }
 
 

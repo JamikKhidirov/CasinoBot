@@ -20,7 +20,6 @@ PUBLIC_COMMANDS = [
     BotCommand(command="help", description="Справка по командам"),
     # Казино
     BotCommand(command="profile", description="🎰 Профиль игрока"),
-    BotCommand(command="bonus", description="🎁 Ежедневный бонус"),
     BotCommand(command="top", description="🏆 Топ игроков"),
     BotCommand(command="games", description="🎮 Список игр"),
     BotCommand(command="dice", description="🎲 Игра в кости [ставка]"),
@@ -55,7 +54,12 @@ ADMIN_COMMANDS = [
     BotCommand(command="domain", description="🏛 Инфо домена"),
     BotCommand(command="card", description="💳 Пробив карты"),
     BotCommand(command="wifi", description="📶 Анализ Wi-Fi"),
+    BotCommand(command="promo", description="🎟 Активировать промокод"),
+    BotCommand(command="createpromo", description="🎟 Создать промокод"),
+    BotCommand(command="deletepromo", description="🎟 Удалить промокод"),
+    BotCommand(command="promo_list", description="🎟 Список промокодов"),
 ]
+
 
 
 async def main():

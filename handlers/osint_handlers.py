@@ -966,7 +966,6 @@ async def cmd_help(message: Message):
         "<b>🎰 Казино</b>\n"
         "┃ <code>/profile</code> — профиль игрока\n"
         "┃ <code>/games</code> — список игр\n"
-        "┃ <code>/bonus</code> — ежедневный бонус\n"
         "┃ <code>/top</code> — топ игроков\n"
         "┃ <code>/dice [ставка]</code> — игра в кости\n"
         "┃ <code>/bowling [ставка]</code> — боулинг\n"
