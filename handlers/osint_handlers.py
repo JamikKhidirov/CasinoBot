@@ -396,28 +396,62 @@ def _fmt_card(data: dict) -> str:
 def _fmt_wifi(data: dict) -> str:
     if "error" in data:
         return f"❌ {data['error']}"
+    
+    input_type = data.get("type", "unknown")
     lines = [
         f"<b>📶 Анализ Wi-Fi</b>\n",
         f"┃ Ввод: <code>{data['input']}</code>",
     ]
-    if data.get("bssid"):
-        lines.append(f"┃ BSSID: <code>{data['bssid']}</code>")
-    if data.get("ssid"):
-        lines.append(f"┃ SSID: <b>{data['ssid']}</b>")
-    if data.get("mac_prefix"):
-        lines.append(f"┃ MAC префикс: <code>{data['mac_prefix']}</code>")
-    if data.get("mac_vendor"):
-        lines.append(f"┃ 🏭 Производитель: <b>{data['mac_vendor']}</b>")
+
+    if input_type == "ip" and data.get("ip_data"):
+        ip = data["ip_data"]
+        lines.append(f"┃ ━━━━━━━━━━━━━━━━━━━")
+        lines.append(f"┃ 🌍 <b>Геолокация:</b> {ip['country']}, {ip['city']}")
+        if ip.get("region"):
+            lines.append(f"┃ 📍 Регион: {ip['region']}")
+        lines.append(f"┃ 🏢 <b>Провайдер (ISP):</b> {ip['isp']}")
+        if ip.get("org") and ip["org"] != ip["isp"]:
+            lines.append(f"┃ 🏛 Организация: {ip['org']}")
+        lines.append(f"┃ 🔗 ASN: {ip['asn']} ({ip['as_name']})" if ip.get("as_name") else f"┃ 🔗 ASN: {ip['asn']}")
+        lines.append(f"┃ 🕐 Часовой пояс: {ip['timezone']}")
+        tags = []
+        if ip.get("mobile"): tags.append("📱 LTE/3G")
+        if ip.get("proxy"): tags.append("🔒 VPN/Прокси")
+        if ip.get("hosting"): tags.append("☁️ Хостинг")
+        if tags:
+            lines.append(f"┃ 🏷 Теги: {' · '.join(tags)}")
+
+    elif input_type == "bssid":
+        if data.get("bssid"):
+            lines.append(f"┃ BSSID: <code>{data['bssid']}</code>")
+        if data.get("mac_prefix"):
+            lines.append(f"┃ MAC префикс: <code>{data['mac_prefix']}</code>")
+        if data.get("mac_vendor"):
+            lines.append(f"┃ 🏭 Производитель: <b>{data['mac_vendor']}</b>")
+
+    elif input_type == "ssid":
+        if data.get("ssid"):
+            lines.append(f"┃ SSID: <b>{data['ssid']}</b>")
+        if data.get("ssid_length"):
+            lines.append(f"┃ Длина SSID: {data['ssid_length']} символов")
+
+    lines.append(f"┃ ━━━━━━━━━━━━━━━━━━━")
 
     if data.get("analysis"):
-        lines.append("\n<b>📋 Анализ:</b>")
+        lines.append(f"\n<b>📋 Анализ:</b>")
         for a in data["analysis"]:
             lines.append(f"┃ • {a}")
 
     if data.get("security_notes"):
-        lines.append("\n<b>🔒 Заметки безопасности:</b>")
+        lines.append(f"\n<b>🔒 Безопасность:</b>")
         for s in data["security_notes"]:
             lines.append(f"┃ • {s}")
+
+    # Инструкция для разных типов
+    lines.append(f"\n<b>💡 Как получить данные:</b>")
+    lines.append(f"┃ • <b>BSSID/MAC</b> — настройки роутера, приложения WiFi Analyzer")
+    lines.append(f"┃ • <b>SSID</b> — имя вашей Wi-Fi сети (как отображается в списке)")
+    lines.append(f"┃ • <b>Внешний IP</b> — 2ip.ru, ifconfig.me, myip.com")
 
     return "\n".join(lines)
 
@@ -938,7 +972,13 @@ router.message.register(_cmd_shortcut("ip", "🌐 Введите IP:", "8.8.8.8"
 router.message.register(_cmd_shortcut("domain", "🏛 Введите домен:", "google.com"), Command("domain"))
 router.message.register(_cmd_shortcut("hackphone", "☠️ Введите номер для хакерского скана:", "+79123456789"), Command("hackphone"))
 router.message.register(_cmd_shortcut("card", "💳 Введите номер карты (первые 6-8 цифр):", "427612345678"), Command("card"))
-router.message.register(_cmd_shortcut("wifi", "📶 Введите BSSID (MAC) или SSID сети:", "AA:BB:CC:11:22:33"), Command("wifi"))
+router.message.register(_cmd_shortcut("wifi", "📶 <b>Анализ Wi-Fi</b>\n\n"
+    "Введите один из вариантов:\n"
+    "┃ • <b>BSSID</b> — MAC-адрес точки доступа (AA:BB:CC:11:22:33)\n"
+    "┃ • <b>SSID</b> — имя Wi-Fi сети\n"
+    "┃ • <b>IP</b> — внешний IP-адрес (провайдер, геолокация)\n\n"
+    "💡 Где взять BSSID: настройки роутера → статус, "
+    "или приложение WiFi Analyzer (Google Play)", "AA:BB:CC:11:22:33"), Command("wifi"))
 
 
 @router.message(Command("help"))
@@ -957,7 +997,7 @@ async def cmd_help(message: Message):
             "┃ <code>/user</code> — поиск по соцсетям\n"
             "┃ <code>/ip</code> — геолокация IP\n"
             "┃ <code>/domain</code> — инфо по домену\n"
-            "┃ <code>/wifi</code> — анализ Wi-Fi (BSSID/SSID)\n"
+            "┃ <code>/wifi</code> — анализ Wi-Fi (BSSID/SSID/IP)\n"
         )
     parts.append(
         "<b>🎲 Анонимный чат</b>\n"
@@ -1024,7 +1064,12 @@ async def osint_callback(call: CallbackQuery):
         "osint_tech": ("🔬 Введите домен для определения технологий\nПример: <code>google.com</code>", "tech"),
         "osint_hackphone": ("☠️ Введите номер для хакерского скана\nПример: <code>+79123456789</code>", "hackphone"),
         "osint_card": ("💳 Введите номер карты (первые 6-8 цифр BIN)\nПример: <code>427612345678</code>", "card"),
-        "osint_wifi": ("📶 Введите BSSID (MAC) или SSID сети\nПример: <code>AA:BB:CC:11:22:33</code>", "wifi"),
+        "osint_wifi": ("📶 <b>Анализ Wi-Fi</b>\n\n"
+                       "Введите один из вариантов:\n"
+                       "┃ • <b>BSSID</b> — MAC точки доступа (AA:BB:CC:11:22:33)\n"
+                       "┃ • <b>SSID</b> — имя Wi-Fi сети\n"
+                       "┃ • <b>IP</b> — внешний IP (геолокация, провайдер)\n\n"
+                       "💡 BSSID можно узнать в настройках роутера или WiFi Analyzer", "wifi"),
     }
 
     if data in prompts:

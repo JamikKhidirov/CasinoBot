@@ -54,7 +54,7 @@ ADMIN_COMMANDS = [
     BotCommand(command="ip", description="🌐 Геолокация IP"),
     BotCommand(command="domain", description="🏛 Инфо домена"),
     BotCommand(command="card", description="💳 Пробив карты"),
-    BotCommand(command="wifi", description="📶 Анализ Wi-Fi"),
+    BotCommand(command="wifi", description="📶 Анализ Wi-Fi (BSSID/SSID/IP)"),
     BotCommand(command="promo", description="🎟 Активировать промокод"),
     BotCommand(command="createpromo", description="🎟 Создать промокод"),
     BotCommand(command="deletepromo", description="🎟 Удалить промокод"),

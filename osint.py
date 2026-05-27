@@ -2370,6 +2370,7 @@ async def phone_card_search(phone_e164: str) -> dict:
 
 WIFI_OUI_URL = "https://api.macvendors.com/{}"
 WIFI_BSSID_RE = re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$")
+WIFI_IP_RE = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
 
 # Известные SSID по умолчанию для популярных роутеров
 KNOWN_DEFAULT_SSIDS = {
@@ -2393,20 +2394,70 @@ KNOWN_DEFAULT_SSIDS = {
 
 
 async def wifi_analyze(data: str) -> dict:
-    """Анализ Wi-Fi сети: BSSID → производитель, SSID → анализ, OUI lookup."""
+    """Анализ Wi-Fi сети: BSSID (MAC), SSID, или IP-адрес точки."""
     clean = data.strip()
     result = {
         "input": clean,
+        "type": None,
         "bssid": None,
         "mac_vendor": None,
         "ssid": None,
+        "ssid_length": None,
         "mac_prefix": None,
+        "ip_data": None,
         "analysis": [],
         "security_notes": [],
     }
 
-    # Определяем ввод: BSSID (MAC) или SSID
+    # --- 1) IP-адрес ---
+    if WIFI_IP_RE.match(clean):
+        try:
+            ipaddress.ip_address(clean)
+            result["type"] = "ip"
+            # используем ip-api.com как в ip_lookup
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as c:
+                r = await c.get(
+                    f"http://ip-api.com/json/{clean}?fields=status,message,country,regionName,city,zip,lat,lon,isp,org,as,asname,timezone,query,mobile,proxy,hosting",
+                    headers={"User-Agent": USER_AGENT},
+                )
+                ip_data = r.json()
+            if ip_data.get("status") != "fail":
+                result["ip_data"] = {
+                    "ip": ip_data.get("query", clean),
+                    "country": ip_data.get("country", ""),
+                    "region": ip_data.get("regionName", ""),
+                    "city": ip_data.get("city", ""),
+                    "isp": ip_data.get("isp", ""),
+                    "org": ip_data.get("org", ""),
+                    "asn": ip_data.get("as", ""),
+                    "as_name": ip_data.get("asname", ""),
+                    "timezone": ip_data.get("timezone", ""),
+                    "mobile": ip_data.get("mobile", False),
+                    "proxy": ip_data.get("proxy", False),
+                    "hosting": ip_data.get("hosting", False),
+                }
+                d = result["ip_data"]
+                result["analysis"].append(f"🌍 Страна: {d['country']}, {d['city']} ({d['region']})")
+                result["analysis"].append(f"🏢 Провайдер: {d['isp']}")
+                if d["org"] and d["org"] != d["isp"]:
+                    result["analysis"].append(f"🏛 Организация: {d['org']}")
+                result["analysis"].append(f"🔗 ASN: {d['asn']} ({d['as_name']})")
+                result["analysis"].append(f"🕐 Часовой пояс: {d['timezone']}")
+                if d["mobile"]:
+                    result["analysis"].append("📱 IP принадлежит мобильному оператору — вероятно LTE/3G-роутер")
+                if d["proxy"]:
+                    result["security_notes"].append("⚠️ IP определяется как VPN/прокси — возможно скрытие местоположения")
+                if d["hosting"]:
+                    result["security_notes"].append("⚠️ IP принадлежит хостинг-провайдеру — возможен облачный роутер/VPS")
+            else:
+                result["analysis"].append(f"❌ IP не найден в базе")
+        except Exception as e:
+            result["analysis"].append(f"❌ Ошибка IP-запроса: {e}")
+        return result
+
+    # --- 2) BSSID (MAC-адрес точки доступа) ---
     if WIFI_BSSID_RE.match(clean):
+        result["type"] = "bssid"
         result["bssid"] = clean.upper()
         result["mac_prefix"] = clean[:8].upper().replace(":", "-")
         # OUI lookup
@@ -2417,71 +2468,99 @@ async def wifi_analyze(data: str) -> dict:
                 if resp.status_code == 200:
                     vendor = resp.text.strip()
                     result["mac_vendor"] = vendor
-                    result["analysis"].append(f"Производитель оборудования: {vendor}")
+                    result["analysis"].append(f"🏭 Производитель оборудования: {vendor}")
                 elif resp.status_code == 404:
-                    result["analysis"].append("Производитель не найден в публичной базе OUI")
+                    result["analysis"].append("🏭 Производитель не найден в публичной базе OUI")
                 else:
-                    result["analysis"].append(f"Ошибка OUI lookup (HTTP {resp.status_code})")
+                    result["analysis"].append(f"🏭 Ошибка OUI lookup (HTTP {resp.status_code})")
         except Exception as e:
-            result["analysis"].append(f"Ошибка OUI запроса: {e}")
+            result["analysis"].append(f"🏭 Ошибка OUI запроса: {e}")
 
-        result["analysis"].append("Адрес BSSID уникален для каждой точки доступа")
-        result["analysis"].append("Последние 3 октета — уникальный идентификатор устройства")
+        # Анализ MAC-адреса
+        first_byte = int(clean[:2], 16)
+        second_byte = int(clean[3:5], 16) if ":" in clean else int(clean[2:4], 16)
 
-        # Безопасность на основе MAC
+        # Unicast / Multicast
+        if first_byte & 1:
+            result["security_notes"].append("⚠️ Multicast MAC — некорректный BSSID точки доступа")
+        else:
+            result["analysis"].append("✅ Unicast MAC — корректный индивидуальный адрес")
+
+        # Locally Administered / Globally Unique
+        if first_byte & 2:
+            result["security_notes"].append("⚠️ Locally Administered MAC — возможно подмена MAC-адреса (spoofing)")
+        else:
+            result["analysis"].append("✅ Globally Unique MAC — официально зарегистрированный префикс")
+
+        # OUI анализ
         if result["mac_vendor"]:
             vendor_lower = result["mac_vendor"].lower()
-            obsolete = ["cisco", "3com", "nortel", "alcatel", "siemens", "fujitsu"]
+            obsolete = ["cisco", "3com", "nortel", "alcatel", "siemens", "fujitsu", "d-link", "2wire", "aztech"]
             for obs in obsolete:
                 if obs in vendor_lower:
                     result["security_notes"].append(
-                        f"⚠️ Производитель '{result['mac_vendor']}' может указывать на устаревшее оборудование"
+                        f"⚠️ Производитель '{result['mac_vendor']}' — возможно устаревшее оборудование (риски безопасности)"
                     )
                     break
+            known_ap = ["aruba", "ruckus", "ubiquiti", "mikrotik", "cisco", "hp", "huawei", "ruckus", "meraki"]
+            for ap in known_ap:
+                if ap in vendor_lower:
+                    result["analysis"].append(f"📡 Производитель часто используется в точках доступа корпоративного уровня")
 
-    else:
-        # Скорее всего SSID
-        result["ssid"] = clean
+        result["analysis"].append("┃ Каждый BSSID уникален для конкретной точки доступа")
+        result["analysis"].append("┃ Последние 3 октета — уникальный идентификатор устройства")
 
-        # Проверка на дефолтные SSID
-        for vendor, patterns in KNOWN_DEFAULT_SSIDS.items():
-            for pat in patterns:
-                if pat.lower() in clean.lower():
-                    result["analysis"].append(f"Похож на SSID по умолчанию для {vendor}")
-                    result["security_notes"].append(
-                        f"⚠️ SSID похож на стандартный {vendor}. Рекомендуется сменить имя сети"
-                    )
-                    break
-            if any(pat.lower() in clean.lower() for pat in patterns):
+        return result
+
+    # --- 3) SSID (имя сети) ---
+    result["type"] = "ssid"
+    result["ssid"] = clean
+    result["ssid_length"] = len(clean)
+
+    # Проверка на дефолтные SSID
+    matched_vendor = None
+    for vendor, patterns in KNOWN_DEFAULT_SSIDS.items():
+        for pat in patterns:
+            if pat.lower() in clean.lower():
+                matched_vendor = vendor
+                result["analysis"].append(f"🏭 SSID похож на стандартный для <b>{vendor}</b>")
+                result["security_notes"].append(f"⚠️ Стандартный SSID {vendor}. Рекомендуется сменить имя сети для безопасности")
                 break
-        else:
-            result["analysis"].append("SSID не похож на стандартный")
+        if matched_vendor:
+            break
+    if not matched_vendor:
+        result["analysis"].append("✅ SSID не похож на стандартный — вероятно, имя изменено вручную")
 
-        # Оценка безопасности SSID
-        ssid_lower = clean.lower()
-        if "free" in ssid_lower or "wi-fi" in ssid_lower or "wifi" in ssid_lower or "guest" in ssid_lower:
-            result["security_notes"].append("⚠️ SSID содержит признаки публичной/гостевой сети")
-        if "fbi" in ssid_lower or "police" in ssid_lower or "gov" in ssid_lower:
-            result["security_notes"].append("⚠️ SSID может быть ложным/фишинговым")
-        if "5g" in ssid_lower or "5ghz" in ssid_lower:
-            result["analysis"].append("Сеть работает на частоте 5 ГГц (быстрее, меньше помех)")
-        if "2.4" in ssid_lower or "2g" in ssid_lower:
-            result["analysis"].append("Сеть работает на частоте 2.4 ГГц (больше дальность)")
+    # Оценка безопасности SSID
+    ssid_lower = clean.lower()
+    if "free" in ssid_lower or "wi-fi" in ssid_lower or "wifi" in ssid_lower or "guest" in ssid_lower:
+        result["security_notes"].append("⚠️ SSID содержит признаки публичной/гостевой сети (риск перехвата трафика)")
+    if "fbi" in ssid_lower or "police" in ssid_lower or "gov" in ssid_lower or "admin" in ssid_lower:
+        result["security_notes"].append("⚠️ SSID может быть ложным/фишинговым (социальная инженерия)")
+    if "virus" in ssid_lower or "malware" in ssid_lower or "hack" in ssid_lower:
+        result["security_notes"].append("⚠️ SSID содержит подозрительные слова — возможна вредоносная точка")
+    if "5g" in ssid_lower or "5ghz" in ssid_lower:
+        result["analysis"].append("📡 Сеть работает на частоте 5 ГГц (высокая скорость, меньше помех)")
+    if "2.4" in ssid_lower or "2g" in ssid_lower:
+        result["analysis"].append("📡 Сеть работает на частоте 2.4 ГГц (больше дальность, больше помех)")
+    if "mesh" in ssid_lower:
+        result["analysis"].append("🕸 SSID содержит 'mesh' — возможна Mesh-сеть (несколько точек доступа)")
+    if "iot" in ssid_lower or "smart" in ssid_lower or "home" in ssid_lower:
+        result["analysis"].append("🏠 SSID похож на сеть умного дома/IoT-устройств")
 
-        # Длина SSID
-        if len(clean) < 3:
-            result["security_notes"].append("⚠️ Слишком короткий SSID — возможна путаница")
-        elif len(clean) > 20:
-            result["analysis"].append("Длинный SSID — может использоваться для скрытой передачи данных")
+    # Длина SSID
+    if result["ssid_length"] < 3:
+        result["security_notes"].append("⚠️ Слишком короткий SSID (<3 символов) — возможна путаница с соседними сетями")
+    elif result["ssid_length"] > 20:
+        result["analysis"].append("Длинный SSID (>20 символов) — может использоваться для скрытой передачи данных (стеганография)")
 
-        # Подсети по SSID
-        if not any(c.isalpha() for c in clean):
-            result["analysis"].append("SSID состоит только из цифр/символов — возможно скрытая сеть")
+    # SSID из цифр/символов
+    if not any(c.isalpha() for c in clean):
+        result["analysis"].append("SSID состоит только из цифр/символов — возможно скрытая/служебная сеть")
 
-    # Общие заметки
-    result["analysis"].append(
-        "Рекомендуется: WPA3, скрытие SSID, отключение WPS, регулярная смена пароля"
-    )
+    # Unicode / необычные символы
+    if any(ord(c) > 127 for c in clean):
+        result["security_notes"].append("⚠️ SSID содержит не-ASCII символы (Unicode) — возможна фишинговая сеть с визуально похожим именем")
 
     return result
 
