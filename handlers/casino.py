@@ -52,6 +52,9 @@ class DepositState(StatesGroup):
 class PaymentProvideState(StatesGroup):
     waiting_for_details = State()
 
+class WithdrawState(StatesGroup):
+    waiting_for_card = State()
+
 
 class GameStates(StatesGroup):
     waiting_for_bet = State()
@@ -109,6 +112,14 @@ async def init_db():
                 permission TEXT,
                 UNIQUE(admin_id, permission)
             );
+            CREATE TABLE IF NOT EXISTS withdraw_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                amount INTEGER,
+                card_details TEXT,
+                status TEXT DEFAULT 'pending',
+                created TEXT
+            );
         """)
         await conn.commit()
     finally:
@@ -117,11 +128,28 @@ async def init_db():
     conn2 = await get_db()
     try:
         await conn2.execute("ALTER TABLE deposit_requests ADD COLUMN payment_details TEXT")
-        await conn2.commit()
     except:
         pass
     finally:
         await conn2.close()
+    # migration: add withdraw_requests for existing DBs
+    conn3 = await get_db()
+    try:
+        await conn3.executescript("""
+            CREATE TABLE IF NOT EXISTS withdraw_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                amount INTEGER,
+                card_details TEXT,
+                status TEXT DEFAULT 'pending',
+                created TEXT
+            )
+        """)
+        await conn3.commit()
+    except:
+        pass
+    finally:
+        await conn3.close()
     # clean up stale pending deposit requests
     conn3 = await get_db()
     try:
@@ -329,7 +357,8 @@ async def cb_casino_profile(call: CallbackQuery):
     )
     markup = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="deposit")]
+            [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="deposit"),
+             InlineKeyboardButton(text="💸 Вывести средства", callback_data="withdraw")]
         ]
     )
     await call.message.answer(text, parse_mode="HTML", reply_markup=markup)
@@ -475,7 +504,8 @@ async def cmd_profile(message: Message):
     )
     markup = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="deposit")]
+            [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="deposit"),
+             InlineKeyboardButton(text="💸 Вывести средства", callback_data="withdraw")]
         ]
     )
     await message.answer(text, reply_markup=markup)
@@ -893,7 +923,267 @@ async def cmd_admin_add_balance(message: Message):
         pass
 
 
-@router.message(Command("бонус"))
+@router.message(Command("выводы"))
+async def cmd_withdrawals(message: Message):
+    if not await has_perm(message.from_user.id, "approve_deposits"):
+        await clean_reply(message, "❌ Доступ запрещён!")
+        return
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT * FROM withdraw_requests WHERE status = 'pending' ORDER BY created"
+        )
+        pending = await cursor.fetchall()
+    finally:
+        await conn.close()
+
+    if not pending:
+        await clean_reply(message, "💸 Нет ожидающих запросов на вывод.")
+        return
+
+    text = "<b>💸 Ожидающие запросы на вывод:</b>\n\n"
+    for req in pending[:10]:
+        username = await get_username(req["user_id"])
+        text += (
+            f"┃ <b>#{req['id']}</b>\n"
+            f"┃ 👤 {username}\n"
+            f"┃ 🆔 <code>{req['user_id']}</code>\n"
+            f"┃ 💵 {req['amount']} монет\n"
+            f"┃ 💳 {req['card_details'][:40]}{'...' if len(req['card_details']) > 40 else ''}\n"
+            f"┃ 📅 {req['created']}\n\n"
+        )
+    if len(pending) > 10:
+        text += f"┃ <i>...и ещё {len(pending) - 10} запросов</i>"
+
+    await clean_reply(message, text)
+
+
+# ─── Withdrawal system ────────────────────────────────────────────────
+
+
+@router.callback_query(F.data == "withdraw")
+async def cb_withdraw(call: CallbackQuery, state: FSMContext):
+    if call.message.chat.type != "private":
+        await call.answer("ℹ️ Для вывода средств перейдите в личные сообщения с ботом.", show_alert=True)
+        bot_username = (await get_bot().me()).username
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Перейти в бота", url=f"https://t.me/{bot_username}")]
+            ]
+        )
+        await call.message.answer(
+            f"💸 {call.from_user.first_name}, для вывода средств перейдите в личные сообщения с ботом:",
+            reply_markup=markup,
+        )
+        return
+
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="100 🪙", callback_data="withdraw_100"),
+         InlineKeyboardButton(text="500 🪙", callback_data="withdraw_500"),
+         InlineKeyboardButton(text="1000 🪙", callback_data="withdraw_1000")],
+        [InlineKeyboardButton(text="5000 🪙", callback_data="withdraw_5000"),
+         InlineKeyboardButton(text="✏️ Другая", callback_data="withdraw_custom")],
+    ])
+    await call.message.edit_text("💸 <b>Вывод средств</b>\n\nВыберите сумму:", parse_mode="HTML", reply_markup=markup)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("withdraw_"))
+async def cb_withdraw_preset(call: CallbackQuery, state: FSMContext):
+    amount_str = call.data.split("_", 1)[1]
+    if amount_str == "custom":
+        await call.message.edit_text("💰 Введите сумму вывода (от 100 до 10000 монет):")
+        await state.set_state(WithdrawState.waiting_for_card)
+        await state.update_data(amount=None)  # will be set from message
+        await call.answer()
+        return
+
+    try:
+        amount = int(amount_str)
+    except ValueError:
+        await call.answer("❌ Некорректная сумма!", show_alert=True)
+        return
+
+    await state.update_data(amount=amount)
+    await call.message.edit_text(
+        f"💳 Введите реквизиты карты для вывода <b>{amount}</b> монет:\n\n"
+        f"Пример:\n"
+        f"Номер карты: 1234 5678 9012 3456\n"
+        f"Банк: СберБанк\n"
+        f"Получатель: Иван И.",
+        parse_mode="HTML"
+    )
+    await state.set_state(WithdrawState.waiting_for_card)
+    await call.answer()
+
+
+@router.message(WithdrawState.waiting_for_card)
+async def process_withdraw_card(message: Message, state: FSMContext):
+    data = await state.get_data()
+    amount = data.get("amount")
+    if amount is None:
+        # came from "custom" — message text is the amount
+        try:
+            amount = int(message.text.strip())
+        except (ValueError, TypeError):
+            await message.answer("❌ Введите целое число от 100 до 10000.")
+            return
+        if not (100 <= amount <= 10000):
+            await message.answer("❌ Сумма должна быть от 100 до 10000 монет.")
+            return
+        await state.update_data(amount=amount)
+        await message.answer(
+            f"💳 Введите реквизиты карты для вывода <b>{amount}</b> монет:\n\n"
+            f"Пример:\nНомер карты: 1234 5678 9012 3456\nБанк: СберБанк\nПолучатель: Иван И.",
+            parse_mode="HTML"
+        )
+        return
+
+    card_details = message.text.strip()
+    if len(card_details) > 500:
+        await message.answer("❌ Слишком много текста. Максимум 500 символов.")
+        return
+
+    # Check user balance
+    user = await get_user(message.from_user.id)
+    if not user or user["balance"] < amount:
+        await message.answer("❌ Недостаточно средств на балансе!")
+        await state.clear()
+        return
+
+    # Check for existing pending request
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT id FROM withdraw_requests WHERE user_id = ? AND status = 'pending'",
+            (message.from_user.id,),
+        )
+        if await cursor.fetchone():
+            await message.answer("❌ У вас уже есть активный запрос на вывод!")
+            await state.clear()
+            return
+
+        cursor = await conn.execute(
+            "INSERT INTO withdraw_requests (user_id, amount, card_details, created) VALUES (?, ?, ?, ?)",
+            (message.from_user.id, amount, card_details, datetime.now().isoformat()),
+        )
+        await conn.commit()
+        withdraw_id = cursor.lastrowid
+    finally:
+        await conn.close()
+
+    await state.clear()
+
+    # Notify admin
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"withdraw_approve_{withdraw_id}"),
+         InlineKeyboardButton(text="❌ Отклонить", callback_data=f"withdraw_reject_{withdraw_id}")]
+    ])
+    username = await get_username(message.from_user.id)
+    await get_bot().send_message(
+        ADMIN_ID,
+        f"🆕 Запрос на вывод средств\n\n"
+        f"👤 Пользователь: {username}\n"
+        f"🆔 ID: {message.from_user.id}\n"
+        f"💵 Сумма: {amount} монет\n"
+        f"💳 Карта: {card_details}",
+        reply_markup=markup,
+    )
+
+    await message.answer(
+        f"✅ Запрос на вывод <b>{amount}</b> монет отправлен администратору.\n"
+        f"Ожидайте подтверждения. Средства будут списаны с вашего баланса после одобрения.",
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("withdraw_approve_"))
+async def cb_withdraw_approve(call: CallbackQuery):
+    if not await has_perm(call.from_user.id, "approve_deposits"):
+        await call.answer("❌ Доступ запрещён!", show_alert=True)
+        return
+
+    withdraw_id = int(call.data.split("_", 2)[2])
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT user_id, amount FROM withdraw_requests WHERE id = ? AND status = 'pending'",
+            (withdraw_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            await call.answer("❌ Запрос уже обработан.", show_alert=True)
+            return
+
+        user_id = row["user_id"]
+        amount = row["amount"]
+
+        # Check balance again
+        cursor2 = await conn.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
+        user = await cursor2.fetchone()
+        if not user or user["balance"] < amount:
+            await call.answer("❌ Недостаточно средств у пользователя!", show_alert=True)
+            return
+
+        await update_balance(user_id, -amount, "withdraw")
+        await conn.execute(
+            "UPDATE withdraw_requests SET status = 'approved' WHERE id = ?",
+            (withdraw_id,),
+        )
+        await conn.commit()
+
+        await get_bot().send_message(
+            user_id,
+            f"✅ Ваш запрос на вывод <b>{amount}</b> монет одобрен!\n"
+            f"Средства отправлены на указанную карту.",
+            parse_mode="HTML"
+        )
+    finally:
+        await conn.close()
+
+    await call.answer("✅ Вывод подтверждён!")
+    try:
+        await get_bot().delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
+
+
+@router.callback_query(F.data.startswith("withdraw_reject_"))
+async def cb_withdraw_reject(call: CallbackQuery):
+    if not await has_perm(call.from_user.id, "approve_deposits"):
+        await call.answer("❌ Доступ запрещён!", show_alert=True)
+        return
+
+    withdraw_id = int(call.data.split("_", 2)[2])
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT user_id FROM withdraw_requests WHERE id = ? AND status = 'pending'",
+            (withdraw_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            await call.answer("❌ Запрос уже обработан.", show_alert=True)
+            return
+
+        await conn.execute(
+            "UPDATE withdraw_requests SET status = 'rejected' WHERE id = ?",
+            (withdraw_id,),
+        )
+        await conn.commit()
+
+        await get_bot().send_message(row["user_id"], "❌ Ваш запрос на вывод был отклонён.")
+    finally:
+        await conn.close()
+
+    await call.answer("❌ Отклонено")
+    try:
+        await get_bot().delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
+
+
+# ─── ───────────────────────────────────────────────────────────────────
 @router.message(Command("bonus"))
 async def cmd_daily_bonus(message: Message):
     user_id = message.from_user.id
@@ -1130,6 +1420,7 @@ def casino_admin_kb(perms: Optional[list[str]] = None) -> InlineKeyboardMarkup:
         buttons.append([InlineKeyboardButton(text="💰 Пополнить баланс", callback_data="casino_admin_add")])
     if "approve_deposits" in perms:
         buttons.append([InlineKeyboardButton(text="📋 Запросы на пополнение", callback_data="casino_admin_pending")])
+        buttons.append([InlineKeyboardButton(text="💸 Запросы на вывод", callback_data="casino_admin_withdrawals")])
     if "manage_admins" in perms:
         buttons.append([InlineKeyboardButton(text="👑 Управление админами", callback_data="casino_admin_manage")])
     buttons.append([InlineKeyboardButton(text="📖 Команды /admin", callback_data="casino_admin_help")])
@@ -1274,6 +1565,86 @@ async def cb_casino_admin_pending(call: CallbackQuery):
     await call.answer()
 
 
+@router.callback_query(F.data == "casino_admin_withdrawals")
+async def cb_casino_admin_withdrawals(call: CallbackQuery):
+    uid = call.from_user.id
+    if not await has_perm(uid, "approve_deposits"):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT * FROM withdraw_requests WHERE status = 'pending' ORDER BY created"
+        )
+        pending = await cursor.fetchall()
+    finally:
+        await conn.close()
+
+    if not pending:
+        await call.message.edit_text("💸 Нет ожидающих запросов на вывод.")
+        await call.answer()
+        return
+
+    text = "<b>💸 Ожидающие запросы на вывод:</b>\n\n"
+    buttons = []
+    for req in pending[:10]:
+        username = await get_username(req["user_id"])
+        text += (
+            f"┃ <b>#{req['id']}</b>\n"
+            f"┃ 👤 {username}\n"
+            f"┃ 🆔 <code>{req['user_id']}</code>\n"
+            f"┃ 💵 {req['amount']} монет\n"
+            f"┃ 💳 {req['card_details'][:40]}{'...' if len(req['card_details']) > 40 else ''}\n"
+            f"┃ 📅 {req['created']}\n\n"
+        )
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"✅ #{req['id']} {username[:15]}" if len(username) <= 15 else f"✅ #{req['id']}",
+                callback_data=f"withdraw_approve_{req['id']}"
+            ),
+            InlineKeyboardButton(
+                text="❌", callback_data=f"admin_withdraw_reject_{req['id']}"
+            ),
+        ])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin")])
+
+    if len(pending) > 10:
+        text += f"┃ <i>...и ещё {len(pending) - 10} запросов</i>\n\n"
+
+    text += "💡 Нажмите кнопку с номером запроса, чтобы обработать."
+
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("admin_withdraw_reject_"))
+async def cb_admin_withdraw_reject(call: CallbackQuery):
+    if not await has_perm(call.from_user.id, "approve_deposits"):
+        await call.answer("❌ Доступ запрещён!", show_alert=True)
+        return
+    withdraw_id = int(call.data.split("_", 3)[3])
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT user_id FROM withdraw_requests WHERE id = ? AND status = 'pending'",
+            (withdraw_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            await call.answer("❌ Запрос уже обработан.", show_alert=True)
+            return
+        await conn.execute(
+            "UPDATE withdraw_requests SET status = 'rejected' WHERE id = ?",
+            (withdraw_id,),
+        )
+        await conn.commit()
+        await get_bot().send_message(row["user_id"], "❌ Ваш запрос на вывод был отклонён.")
+    finally:
+        await conn.close()
+    await call.answer("❌ Отклонено")
+    await cb_casino_admin_withdrawals(call)
+
+
 @router.callback_query(F.data == "casino_admin_add")
 async def cb_casino_admin_add(call: CallbackQuery):
     uid = call.from_user.id
@@ -1369,6 +1740,7 @@ ADMIN_COMMANDS = {
     "/perms <id>": "🔑 Посмотреть права пользователя",
     "/игроки": "👥 Список всех игроков (право: view_players)",
     "/пополнить <id> <сумма>": "💰 Пополнить баланс (право: add_balance)",
+    "/выводы": "💸 Список запросов на вывод (право: approve_deposits)",
 }
 
 
