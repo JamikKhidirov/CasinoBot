@@ -2539,7 +2539,7 @@ async def process_dice_roll(game: GameRoom, player_id: int, dice_value: int):
     if game.results.get(player_id, -1) > 0:
         return
     # Для дротиков вычитаем 1 (очки 0-5 вместо 1-6)
-    stored = dice_value - 1 if game.game_type == "дротики" else dice_value
+    stored = dice_value - 1 if game.game_type in ("дротики", "боулинг") else dice_value
     game.results[player_id] = stored
     player_name = await get_username(player_id)
     config = GAMES_CONFIG[game.game_type]
@@ -2551,7 +2551,7 @@ async def process_dice_roll(game: GameRoom, player_id: int, dice_value: int):
         pass
 
     # Логируем результат броска в консоль
-    log_value = f"{dice_value}→{stored}" if game.game_type == "дротики" else str(dice_value)
+    log_value = f"{dice_value}→{stored}" if game.game_type in ("дротики", "боулинг") else str(dice_value)
     logger.info(f"🎲 Бросок в игре {game.game_type}: {player_name} = {log_value} (комната {game.room_id})")
 
     wait_msg = await get_bot().send_message(game.chat_id, f"⏳ {player_name} {config['action']}, ожидаем результат...")
@@ -2565,7 +2565,7 @@ async def process_dice_roll(game: GameRoom, player_id: int, dice_value: int):
             except Exception:
                 pass
 
-            adjusted = dice_value - 1 if game.game_type == "дротики" else dice_value
+            adjusted = dice_value - 1 if game.game_type in ("дротики", "боулинг") else dice_value
             score_text = {
                 "⚽": f"{'⚽ ГОЛ!' if dice_value > 2 else '❌ Промах!'}",
                 "🏀": f"{'🏀 Попадание!' if dice_value > 2 else '❌ Промах!'}",
@@ -2854,12 +2854,12 @@ async def auto_roll_dice(game: GameRoom):
     # Игрок не кинул (нет в results или стоит заглушка -1)
     if game.results.get(game.player1, -1) < 0:
         d1 = await get_bot().send_dice(game.chat_id, emoji=config["emoji"])
-        stored = d1.dice.value - 1 if game.game_type == "дротики" else d1.dice.value
+        stored = d1.dice.value - 1 if game.game_type in ("дротики", "боулинг") else d1.dice.value
         game.results[game.player1] = stored
         logger.info(f"🎲 Авто-бросок {game.game_type}: {await get_username(game.player1)} = {d1.dice.value}→{stored}")
     if game.player2 and game.results.get(game.player2, -1) < 0:
         d2 = await get_bot().send_dice(game.chat_id, emoji=config["emoji"])
-        stored = d2.dice.value - 1 if game.game_type == "дротики" else d2.dice.value
+        stored = d2.dice.value - 1 if game.game_type in ("дротики", "боулинг") else d2.dice.value
         game.results[game.player2] = stored
         logger.info(f"🎲 Авто-бросок {game.game_type}: {await get_username(game.player2)} = {d2.dice.value}→{stored}")
 
