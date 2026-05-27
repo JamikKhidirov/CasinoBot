@@ -508,7 +508,7 @@ async def cmd_profile(message: Message):
              InlineKeyboardButton(text="💸 Вывести средства", callback_data="withdraw")]
         ]
     )
-    await message.answer(text, reply_markup=markup)
+    await message.answer(text, parse_mode="HTML", reply_markup=markup)
 
 
 @router.callback_query(F.data == "deposit")
@@ -613,7 +613,7 @@ async def send_admin_notification(user_id: int, amount: int, deposit_id: int):
             ADMIN_ID,
             f"🆕 Запрос на пополнение\n\n"
             f"👤 Пользователь: {username}\n"
-            f"🆔 ID: {user_id}\n"
+            f"🆔 ID: <code>{user_id}</code>\n"
             f"💵 Сумма: {amount} монет",
             reply_markup=markup,
         )
@@ -702,7 +702,7 @@ async def process_payment_details(message: Message, state: FSMContext):
         reply_markup=markup,
     )
 
-    await message.answer(f"✅ Реквизиты отправлены пользователю (ID: {user_id}).")
+    await message.answer(f"✅ Реквизиты отправлены пользователю (ID: <code>{user_id}</code>).")
     try:
         await get_bot().delete_message(message.chat.id, message.message_id)
     except:
@@ -739,7 +739,7 @@ async def cb_user_paid(call: CallbackQuery):
     await get_bot().send_message(
         ADMIN_ID,
         f"👤 Пользователь: {username}\n"
-        f"🆔 ID: {row['user_id']}\n"
+        f"🆔 ID: <code>{row['user_id']}</code>\n"
         f"💵 Сумма: {row['amount']} монет\n\n"
         f"✅ Пользователь подтвердил оплату.\n"
         f"Проверьте свой счёт и подтвердите.",
@@ -1338,9 +1338,9 @@ async def cmd_all_players(message: Message):
     parts = []
     chunk = []
     for p in players:
-        name = f"@{p['username']}" if p["username"] else f"ID_{p['user_id']}"
+        name = f"@{p['username']}" if p["username"] else f"ID {p['user_id']}"
         chunk.append(
-            f"👤 ID: {p['user_id']} | {name}\n"
+            f"👤 <code>{p['user_id']}</code> | {name}\n"
             f"💰 {p['balance']} | 🎮 {p['games_played']} | 🏆 {p['wins']}\n"
             f"📅 Бонус: {p['last_bonus'] or 'нет'}\n"
             f"{'─' * 20}"
@@ -1353,10 +1353,10 @@ async def cmd_all_players(message: Message):
         parts.append("\n".join(chunk))
         chunk = []
 
-    header = f"👥 Все игроки ({len(players)}):\n\n"
+    header = f"<b>👥 Все игроки ({len(players)}):</b>\n\n"
     for i, part in enumerate(parts):
         text = header if i == 0 else ""
-        await message.answer(text + part)
+        await message.answer(text + part, parse_mode="HTML")
 
 
 # ─── Permission system ──────────────────────────────────────────────
@@ -1482,20 +1482,22 @@ async def cb_casino_admin_players(call: CallbackQuery):
         return
     conn = await get_db()
     try:
-        cursor = await conn.execute("SELECT * FROM casino_admins ORDER BY admin_id")
-        admins = await cursor.fetchall()
+        cursor = await conn.execute("SELECT user_id, username, balance FROM users ORDER BY user_id")
+        players = await cursor.fetchall()
     finally:
         await conn.close()
 
-    if not admins:
-        await call.message.edit_text("👥 Админы не найдены.")
+    if not players:
+        await call.message.edit_text("👥 Игроки не найдены.")
         await call.answer()
         return
 
-    lines = ["<b>👑 Администраторы казино:</b>\n"]
-    for a in admins:
-        name = await get_username(a["admin_id"])
-        lines.append(f"┣ {name} (ID: <code>{a['admin_id']}</code>)")
+    lines = ["<b>👥 Список игроков:</b>\n"]
+    for p in players[:20]:
+        name = f"@{p['username']}" if p["username"] else f"ID {p['user_id']}"
+        lines.append(f"┣ {name}\n┃ 🆔 <code>{p['user_id']}</code> | 💰 {p['balance']} 🪙")
+    if len(players) > 20:
+        lines.append(f"\n┃ <i>...и ещё {len(players) - 20} игроков</i>")
     await call.message.edit_text(
         "\n".join(lines),
         parse_mode="HTML",
