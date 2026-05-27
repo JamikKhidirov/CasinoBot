@@ -2133,24 +2133,24 @@ async def create_game_for_user(
 
         player1_name = await get_username(user_id)
         group_msg = (
-            f"🎉 Создана новая игра в {GAMES_CONFIG[game_type]['emoji']}!\n"
-            f"💵 Ставка: {bet} монет\n"
+            f"🎉 <b>Создана новая игра</b> в {GAMES_CONFIG[game_type]['emoji']}!\n"
+            f"💵 Ставка: <b>{bet}</b> монет\n"
             f"⏳ Время на присоединение: {GAMES_CONFIG[game_type]['timeout']} сек\n"
             f"Игрок 1: {player1_name}\n"
             f"Места: 1/2"
         )
         if edit_target:
             try:
-                sent = await edit_target.edit_text(group_msg, reply_markup=game_keyboard(room_id, user_id))
+                sent = await edit_target.edit_text(group_msg, reply_markup=game_keyboard(room_id, user_id), parse_mode="HTML")
                 game.chat_id = edit_target.chat.id
                 game.message_id = sent.message_id
                 logger.info(f"create_game: отредактировано сообщение {edit_target.message_id}")
             except Exception:
-                sent = await target_msg.answer(group_msg, reply_markup=game_keyboard(room_id, user_id))
+                sent = await target_msg.answer(group_msg, reply_markup=game_keyboard(room_id, user_id), parse_mode="HTML")
                 game.chat_id = target_msg.chat.id
                 game.message_id = sent.message_id
         else:
-            sent = await target_msg.answer(group_msg, reply_markup=game_keyboard(room_id, user_id))
+            sent = await target_msg.answer(group_msg, reply_markup=game_keyboard(room_id, user_id), parse_mode="HTML")
             game.chat_id = target_msg.chat.id
             game.message_id = sent.message_id
         asyncio.ensure_future(game_timeout(room_id, GAMES_CONFIG[game_type]["timeout"]))
@@ -2659,13 +2659,13 @@ async def determine_winner(game: GameRoom):
                 if p1_score < 2 and p2_score < 2:
                     await update_balance(game.player1, game.bet, "refund")
                     await update_balance(game.player2, game.bet, "refund")
-                    result_msg = "🎭 Оба игрока проиграли (результат < 2)! Ставки возвращены."
+                    result_msg = "🎭 Ничья! Ставки возвращены."
                 elif p1_score < 2:
                     winner = game.player2
-                    result_msg = f"🏆 Победитель: {await get_username(winner)}\n💰 Выигрыш: {prize} монет\n💼 Комиссия: {commission} монет\n❌ {await get_username(game.player1)} проиграл (результат < 2)"
+                    result_msg = f"🏆 Победитель: {await get_username(winner)}\n💰 Выигрыш: {prize} монет\n💼 Комиссия: {commission} монет"
                 elif p2_score < 2:
                     winner = game.player1
-                    result_msg = f"🏆 Победитель: {await get_username(winner)}\n💰 Выигрыш: {prize} монет\n💼 Комиссия: {commission} монет\n❌ {await get_username(game.player2)} проиграл (результат < 2)"
+                    result_msg = f"🏆 Победитель: {await get_username(winner)}\n💰 Выигрыш: {prize} монет\n💼 Комиссия: {commission} монет"
                 elif p1_score > p2_score:
                     winner = game.player1
                     result_msg = f"🏆 Победитель: {await get_username(winner)}\n💰 Выигрыш: {prize} монет\n💼 Комиссия: {commission} монет"
@@ -2777,8 +2777,8 @@ async def show_countdown(game: GameRoom, total: int):
         try:
             p1_name = await get_username(game.player1)
             msg = (
-                f"🎉 Создана новая игра в {GAMES_CONFIG[game.game_type]['emoji']}!\n"
-                f"💵 Ставка: {game.bet} монет\n"
+                f"🎉 <b>Создана новая игра</b> в {GAMES_CONFIG[game.game_type]['emoji']}!\n"
+                f"💵 Ставка: <b>{game.bet}</b> монет\n"
                 f"⏳ Присоединиться: {remaining} сек\n"
                 f"Игрок 1: {p1_name}\n"
                 f"Места: 1/2"
@@ -2788,6 +2788,7 @@ async def show_countdown(game: GameRoom, total: int):
                 message_id=game.message_id,
                 text=msg,
                 reply_markup=game_keyboard(game.room_id, game.player1),
+                parse_mode="HTML",
             )
         except Exception:
             pass
