@@ -2366,6 +2366,126 @@ async def phone_card_search(phone_e164: str) -> dict:
     return result
 
 
+# ==================== WIFI / BSSID / NETWORK ANALYSIS ====================
+
+WIFI_OUI_URL = "https://api.macvendors.com/{}"
+WIFI_BSSID_RE = re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$")
+
+# Известные SSID по умолчанию для популярных роутеров
+KNOWN_DEFAULT_SSIDS = {
+    "TP-Link": ["TP-LINK", "TP-Link", "TP-Link_", "TP-LINK_"],
+    "D-Link": ["D-Link", "D-LINK", "dlink", "DIR-", "DES-"],
+    "ASUS": ["ASUS", "ASUS_", "ASUS-"],
+    "Xiaomi": ["Xiaomi", "MIWIFI", "Redmi"],
+    "Huawei": ["Huawei", "HUAWEI", "HUAWEI-", "Huawei-"],
+    "ZTE": ["ZTE", "ZTE_", "ZTE-"],
+    "MikroTik": ["MikroTik", "MikroTik-"],
+    "Ubiquiti": ["Ubiquiti", "UBNT", "UniFi"],
+    "Netgear": ["NETGEAR", "Netgear", "NETGEAR-"],
+    "Linksys": ["Linksys", "LINKSYS"],
+    "Tenda": ["Tenda", "TENDA"],
+    "Mercusys": ["Mercusys", "MERCUSYS"],
+    "Keenetic": ["Keenetic", "KEENETIC"],
+    "Apple": ["Apple", "Apple-"],
+    "Google": ["Google", "Google-", "Google Fiber"],
+    "Starlink": ["Starlink", "STARLINK"],
+}
+
+
+async def wifi_analyze(data: str) -> dict:
+    """Анализ Wi-Fi сети: BSSID → производитель, SSID → анализ, OUI lookup."""
+    clean = data.strip()
+    result = {
+        "input": clean,
+        "bssid": None,
+        "mac_vendor": None,
+        "ssid": None,
+        "mac_prefix": None,
+        "analysis": [],
+        "security_notes": [],
+    }
+
+    # Определяем ввод: BSSID (MAC) или SSID
+    if WIFI_BSSID_RE.match(clean):
+        result["bssid"] = clean.upper()
+        result["mac_prefix"] = clean[:8].upper().replace(":", "-")
+        # OUI lookup
+        try:
+            url = WIFI_OUI_URL.format(result["mac_prefix"])
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+                resp = await client.get(url, headers={"User-Agent": USER_AGENT})
+                if resp.status_code == 200:
+                    vendor = resp.text.strip()
+                    result["mac_vendor"] = vendor
+                    result["analysis"].append(f"Производитель оборудования: {vendor}")
+                elif resp.status_code == 404:
+                    result["analysis"].append("Производитель не найден в публичной базе OUI")
+                else:
+                    result["analysis"].append(f"Ошибка OUI lookup (HTTP {resp.status_code})")
+        except Exception as e:
+            result["analysis"].append(f"Ошибка OUI запроса: {e}")
+
+        result["analysis"].append("Адрес BSSID уникален для каждой точки доступа")
+        result["analysis"].append("Последние 3 октета — уникальный идентификатор устройства")
+
+        # Безопасность на основе MAC
+        if result["mac_vendor"]:
+            vendor_lower = result["mac_vendor"].lower()
+            obsolete = ["cisco", "3com", "nortel", "alcatel", "siemens", "fujitsu"]
+            for obs in obsolete:
+                if obs in vendor_lower:
+                    result["security_notes"].append(
+                        f"⚠️ Производитель '{result['mac_vendor']}' может указывать на устаревшее оборудование"
+                    )
+                    break
+
+    else:
+        # Скорее всего SSID
+        result["ssid"] = clean
+
+        # Проверка на дефолтные SSID
+        for vendor, patterns in KNOWN_DEFAULT_SSIDS.items():
+            for pat in patterns:
+                if pat.lower() in clean.lower():
+                    result["analysis"].append(f"Похож на SSID по умолчанию для {vendor}")
+                    result["security_notes"].append(
+                        f"⚠️ SSID похож на стандартный {vendor}. Рекомендуется сменить имя сети"
+                    )
+                    break
+            if any(pat.lower() in clean.lower() for pat in patterns):
+                break
+        else:
+            result["analysis"].append("SSID не похож на стандартный")
+
+        # Оценка безопасности SSID
+        ssid_lower = clean.lower()
+        if "free" in ssid_lower or "wi-fi" in ssid_lower or "wifi" in ssid_lower or "guest" in ssid_lower:
+            result["security_notes"].append("⚠️ SSID содержит признаки публичной/гостевой сети")
+        if "fbi" in ssid_lower or "police" in ssid_lower or "gov" in ssid_lower:
+            result["security_notes"].append("⚠️ SSID может быть ложным/фишинговым")
+        if "5g" in ssid_lower or "5ghz" in ssid_lower:
+            result["analysis"].append("Сеть работает на частоте 5 ГГц (быстрее, меньше помех)")
+        if "2.4" in ssid_lower or "2g" in ssid_lower:
+            result["analysis"].append("Сеть работает на частоте 2.4 ГГц (больше дальность)")
+
+        # Длина SSID
+        if len(clean) < 3:
+            result["security_notes"].append("⚠️ Слишком короткий SSID — возможна путаница")
+        elif len(clean) > 20:
+            result["analysis"].append("Длинный SSID — может использоваться для скрытой передачи данных")
+
+        # Подсети по SSID
+        if not any(c.isalpha() for c in clean):
+            result["analysis"].append("SSID состоит только из цифр/символов — возможно скрытая сеть")
+
+    # Общие заметки
+    result["analysis"].append(
+        "Рекомендуется: WPA3, скрытие SSID, отключение WPS, регулярная смена пароля"
+    )
+
+    return result
+
+
 async def card_lookup(card_number: str) -> dict:
     """Bank card BIN lookup — определяет банк, тип, страну по первым 6-8 цифрам карты"""
     clean = re.sub(r"\D", "", card_number)

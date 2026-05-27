@@ -31,6 +31,7 @@ def osint_menu_kb():
         [InlineKeyboardButton(text="💳 Пробив карты", callback_data="osint_card")],
         [InlineKeyboardButton(text="🕵️ Анализ SSL домена", callback_data="osint_ssl")],
         [InlineKeyboardButton(text="🔬 Определить технологии", callback_data="osint_tech")],
+        [InlineKeyboardButton(text="📶 Анализ Wi-Fi (BSSID/SSID)", callback_data="osint_wifi")],
         [InlineKeyboardButton(text="◀️ На главную", callback_data="back_main")]
     ])
 

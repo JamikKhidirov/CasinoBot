@@ -54,6 +54,7 @@ ADMIN_COMMANDS = [
     BotCommand(command="ip", description="🌐 Геолокация IP"),
     BotCommand(command="domain", description="🏛 Инфо домена"),
     BotCommand(command="card", description="💳 Пробив карты"),
+    BotCommand(command="wifi", description="📶 Анализ Wi-Fi"),
 ]
 
 
@@ -104,7 +105,7 @@ async def main():
             await bot.set_my_commands(PUBLIC_COMMANDS, scope=BotCommandScopeDefault())
             await bot.set_my_commands(ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=OWNER_ID))
             logger.info("Команды зарегистрированы")
-            await dp.start_polling(bot, drop_pending_updates=True)
+            await dp.start_polling(bot, drop_pending_updates=True)      
             logger.info("Polling завершён (без ошибки)")
             break
         except TelegramNetworkError as e:

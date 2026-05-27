@@ -14,7 +14,7 @@ from osint import (phone_lookup, email_lookup, username_lookup, ip_lookup,
                    ssl_analyze, securitytrails_domain, virustotal_lookup,
                    hunter_email, tech_detect, enhanced_port_scan,
                      phone_full_enrich, username_phone_search, username_messages_search,
-                     phone_scan, card_lookup, phone_card_search)
+                     phone_scan, card_lookup, phone_card_search, wifi_analyze)
 from leak import leak_search
 
 router = Router()
@@ -390,6 +390,35 @@ def _fmt_card(data: dict) -> str:
             lines.append(f"┃ └ Телефон: <code>{data['bank_phone']}</code>")
     if data.get("country") and data["country"] != "—":
         lines.append(f"┃ 🌍 Страна: {data['country']} ({data.get('country_code', '—')})")
+    return "\n".join(lines)
+
+
+def _fmt_wifi(data: dict) -> str:
+    if "error" in data:
+        return f"❌ {data['error']}"
+    lines = [
+        f"<b>📶 Анализ Wi-Fi</b>\n",
+        f"┃ Ввод: <code>{data['input']}</code>",
+    ]
+    if data.get("bssid"):
+        lines.append(f"┃ BSSID: <code>{data['bssid']}</code>")
+    if data.get("ssid"):
+        lines.append(f"┃ SSID: <b>{data['ssid']}</b>")
+    if data.get("mac_prefix"):
+        lines.append(f"┃ MAC префикс: <code>{data['mac_prefix']}</code>")
+    if data.get("mac_vendor"):
+        lines.append(f"┃ 🏭 Производитель: <b>{data['mac_vendor']}</b>")
+
+    if data.get("analysis"):
+        lines.append("\n<b>📋 Анализ:</b>")
+        for a in data["analysis"]:
+            lines.append(f"┃ • {a}")
+
+    if data.get("security_notes"):
+        lines.append("\n<b>🔒 Заметки безопасности:</b>")
+        for s in data["security_notes"]:
+            lines.append(f"┃ • {s}")
+
     return "\n".join(lines)
 
 
@@ -867,6 +896,10 @@ async def _execute_lookup(message: Message, mode: str, query: str):
             result = await card_lookup(query)
             log_osint_query(uid, "card", query)
             formatted = _fmt_card(result)
+        elif mode == "wifi":
+            result = await wifi_analyze(query)
+            log_osint_query(uid, "wifi", query)
+            formatted = _fmt_wifi(result)
         else:
             formatted = "❌ Неизвестный тип поиска"
     except Exception as e:
@@ -905,6 +938,7 @@ router.message.register(_cmd_shortcut("ip", "🌐 Введите IP:", "8.8.8.8"
 router.message.register(_cmd_shortcut("domain", "🏛 Введите домен:", "google.com"), Command("domain"))
 router.message.register(_cmd_shortcut("hackphone", "☠️ Введите номер для хакерского скана:", "+79123456789"), Command("hackphone"))
 router.message.register(_cmd_shortcut("card", "💳 Введите номер карты (первые 6-8 цифр):", "427612345678"), Command("card"))
+router.message.register(_cmd_shortcut("wifi", "📶 Введите BSSID (MAC) или SSID сети:", "AA:BB:CC:11:22:33"), Command("wifi"))
 
 
 @router.message(Command("help"))
@@ -923,6 +957,7 @@ async def cmd_help(message: Message):
             "┃ <code>/user</code> — поиск по соцсетям\n"
             "┃ <code>/ip</code> — геолокация IP\n"
             "┃ <code>/domain</code> — инфо по домену\n"
+            "┃ <code>/wifi</code> — анализ Wi-Fi (BSSID/SSID)\n"
         )
     parts.append(
         "<b>🎲 Анонимный чат</b>\n"
@@ -990,10 +1025,11 @@ async def osint_callback(call: CallbackQuery):
         "osint_tech": ("🔬 Введите домен для определения технологий\nПример: <code>google.com</code>", "tech"),
         "osint_hackphone": ("☠️ Введите номер для хакерского скана\nПример: <code>+79123456789</code>", "hackphone"),
         "osint_card": ("💳 Введите номер карты (первые 6-8 цифр BIN)\nПример: <code>427612345678</code>", "card"),
+        "osint_wifi": ("📶 Введите BSSID (MAC) или SSID сети\nПример: <code>AA:BB:CC:11:22:33</code>", "wifi"),
     }
 
     if data in prompts:
-        if uid != OWNER_ID:
+        if not is_dev(uid) and not is_admin(uid):
             await call.answer("❌ OSINT доступен только администраторам.", show_alert=True)
             return
         msg, mode = prompts[data]
@@ -1117,6 +1153,10 @@ async def osint_text_handler(message: Message):
             result = await card_lookup(text)
             log_osint_query(uid, "card", text)
             formatted = _fmt_card(result)
+        elif mode == "wifi":
+            result = await wifi_analyze(text)
+            log_osint_query(uid, "wifi", text)
+            formatted = _fmt_wifi(result)
         else:
             formatted = "❌ Неизвестный тип поиска"
     except Exception as e:
