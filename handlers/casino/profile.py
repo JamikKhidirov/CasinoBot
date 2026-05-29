@@ -35,7 +35,7 @@ async def cmd_profile(message: Message):
         f"<b>📊 Профиль игрока</b> {message.from_user.first_name}\n\n"
         f"┃ 🆔 ID: <code>{user['user_id']}</code>\n"
         f"┃ 💰 <b>PVP баланс:</b> {user['balance']} 🪙\n"
-        f"┃ 🤖 <b>С ботом:</b> {bbot} 🤖\n"
+        f"┃ 🤖 <b>Игра с ботом:</b> {bbot} 🤖\n"
         f"┃ 🃏 <b>Блэкджек:</b> {bj_bal} 🪙\n"
         f"┃ 🎮 <b>Сыграно игр:</b> {user['games_played']}\n"
         f"┃ 🏆 <b>Побед:</b> {user['wins']}\n"

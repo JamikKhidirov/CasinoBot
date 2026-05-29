@@ -23,7 +23,7 @@ async def cb_casino_menu(call: CallbackQuery):
     await call.message.edit_text(
         f"🎰 <b>Меню казино</b>\n\n"
         f"┃ 💰 <b>PVP:</b> {user['balance']} 🪙\n"
-        f"┃ 🤖 <b>С ботом:</b> {bbot} 🤖\n"
+        f"┃ 🤖 <b>Ваш счёт (игра с ботом):</b> {bbot} 🤖\n"
         f"┃ 🃏 <b>Блэкджек:</b> {bj} 🪙\n"
         f"┃ 🏆 <b>Побед:</b> {user['wins']} / {user['games_played']} игр",
         parse_mode="HTML",
@@ -67,7 +67,7 @@ async def cb_casino_profile(call: CallbackQuery):
         f"<b>📊 Профиль игрока</b> {call.from_user.first_name}\n\n"
         f"┃ 🆔 ID: <code>{user['user_id']}</code>\n"
         f"┃ 💰 <b>PVP баланс:</b> {user['balance']} 🪙\n"
-        f"┃ 🤖 <b>С ботом:</b> {bbot} 🤖\n"
+        f"┃ 🤖 <b>Игра с ботом:</b> {bbot} 🤖\n"
         f"┃ 🃏 <b>Блэкджек:</b> {bj_bal} 🪙\n"
         f"┃ ⭐ <b>Соло очки:</b> {solo_score} ({solo_games} игр)\n"
         f"┃ 🎮 <b>Сыграно PVP игр:</b> {user['games_played']}\n"

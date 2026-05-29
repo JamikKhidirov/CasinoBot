@@ -80,43 +80,54 @@ async def solo_game_play(message: Message, game_type: str, bet: int):
     await update_bot_balance(message.from_user.id, -bet, "solo_reserve")
 
     config = GAMES_CONFIG[game_type]
-    player_name = message.from_user.first_name or f"Игрок {message.from_user.id}"
+    player_tag = await get_username(message.from_user.id)
 
     msg = await message.reply(
-        f"🎲 <b>Игра с ботом</b> {config['emoji']}!\n"
-        f"💵 Ставка: {bet} монет\n\n"
-        f"{player_name} бросает..."
+        f"🤖 <b>Игра с ботом</b> {config['emoji']}\n"
+        f"💵 Ставка: {bet} монет\n"
+        f"💰 Ваш счёт: {bal} монет\n\n"
+        f"{player_tag} бросает..."
     )
 
+    await asyncio.sleep(1)
     player_dice = await message.answer_dice(emoji=config["emoji"])
-    await asyncio.sleep(4.5)
+    await asyncio.sleep(5)
 
     await msg.edit_text(
-        f"🎲 <b>Игра с ботом</b> {config['emoji']}!\n"
+        f"🤖 <b>Игра с ботом</b> {config['emoji']}\n"
         f"💵 Ставка: {bet} монет\n\n"
-        f"{player_name}: {player_dice.dice.value}\n"
+        f"{player_tag}: {player_dice.dice.value}\n"
         f"🤖 Бот бросает..."
     )
 
     bot_dice_msg = await message.answer_dice(emoji=config["emoji"])
     bot_dice = bot_dice_msg.dice.value
-    await asyncio.sleep(4.5)
+    await asyncio.sleep(5)
 
     bot_adjusted = bot_dice - 1 if game_type in ("дротики", "боулинг") else bot_dice
     player_adjusted = player_dice.dice.value - 1 if game_type in ("дротики", "боулинг") else player_dice.dice.value
 
+    bot_name = "🤖 Бот"
+
     await msg.edit_text(
-        f"🎲 <b>Игра с ботом</b> {config['emoji']}!\n"
+        f"🤖 <b>Игра с ботом</b> {config['emoji']}\n"
         f"💵 Ставка: {bet} монет\n\n"
-        f"{player_name}: {player_adjusted}\n"
-        f"🤖 Бот: {bot_adjusted}"
+        f"{player_tag}: {player_adjusted}\n"
+        f"{bot_name}: {bot_adjusted}"
     )
+
+    await asyncio.sleep(1)
+    new_user = await get_user(message.from_user.id)
+    new_bal = new_user["bot_balance"] if new_user else bal
 
     conn = None
     if player_adjusted > bot_adjusted:
         prize = bet * 2
         await update_bot_balance(message.from_user.id, prize, "solo_win")
-        await message.answer(f"🏆 <b>Вы выиграли!</b> +{prize} монет")
+        await message.answer(
+            f"🏆 <b>Вы выиграли!</b> +{prize} монет\n"
+            f"💰 Ваш счёт: {new_bal + prize} монет"
+        )
         conn = await get_db()
         try:
             await conn.execute(
@@ -129,7 +140,10 @@ async def solo_game_play(message: Message, game_type: str, bet: int):
             pass
     elif bot_adjusted > player_adjusted:
         await update_bot_balance(message.from_user.id, 0, "solo_lose")
-        await message.answer(f"❌ <b>Бот выиграл!</b> -{bet} монет")
+        await message.answer(
+            f"❌ <b>Бот выиграл!</b> -{bet} монет\n"
+            f"💰 Ваш счёт: {new_bal} монет"
+        )
         conn = await get_db()
         try:
             await conn.execute(
@@ -142,7 +156,10 @@ async def solo_game_play(message: Message, game_type: str, bet: int):
             pass
     else:
         await update_bot_balance(message.from_user.id, bet, "solo_tie")
-        await message.answer(f"🎭 <b>Ничья!</b> Ставка возвращена.")
+        await message.answer(
+            f"🎭 <b>Ничья!</b> Ставка возвращена.\n"
+            f"💰 Ваш счёт: {new_bal + bet} монет"
+        )
         conn = await get_db()
         try:
             await conn.execute(
