@@ -7,7 +7,7 @@ from .base import (
     GAMES_CONFIG, active_games, active_blackjack_games, active_games_lock,
     ADMIN_ID, is_casino_admin, has_perm, init_db,
 )
-from .keyboards import casino_menu_kb, game_selection_kb, bet_selection_kb, casino_admin_kb
+from .keyboards import casino_menu_kb, game_selection_kb, pvp_game_selection_kb, solo_game_selection_kb, solo_bet_selection_kb, blackjack_bet_kb, bet_selection_kb, casino_admin_kb
 
 router = Router()
 
@@ -169,12 +169,8 @@ async def cb_casino_play_bot(call: CallbackQuery):
         await call.message.edit_text(text)
         await call.answer()
         return
-    text = "🤖 **Игра с ботом**\n\nФормат: `/сботом [игра] [ставка]`\n\n"
-    for game_type, cfg in GAMES_CONFIG.items():
-        text += f"/сботом {cfg['command']} [ставка] — {game_type} {cfg['emoji']}\n"
-    text += "\nПример: `/сботом куб 50`\n\n"
-    text += "Бот кидает кубик одновременно. Кто выиграл — забирает ставку."
-    await call.message.edit_text(text)
+    text = "🤖 **Игра с ботом**\n\n⬇️ <b>Выберите игру:</b>"
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=solo_game_selection_kb())
     await call.answer()
 
 
@@ -187,19 +183,16 @@ async def cb_casino_play_pvp(call: CallbackQuery):
             "📌 **Как играть:**\n"
             "1. Добавьте бота в группу: `@{}`\n"
             "2. Дайте боту права администратора\n"
-            "3. Напишите в группе: `/куб 100`\n"
+            "3. Выберите игру и ставку ниже\n"
             "4. Другой игрок нажимает «Присоединиться»\n\n"
+            "⬇️ <b>Выберите игру:</b>"
         ).format(bot_username)
-        markup = _inline_keyboard([[("◀️ Назад", "casino_games")]])
-        await call.message.edit_text(text, reply_markup=markup)
-        await call.answer("Добавьте бота в группу!", show_alert=False)
+        await call.message.edit_text(text, parse_mode="HTML", reply_markup=pvp_game_selection_kb())
+        await call.answer()
         return
 
-    text = "👥 **Игра с игроками**\n\nФормат: `/команда [ставка]`\n\n"
-    for game_type, cfg in GAMES_CONFIG.items():
-        text += f"/{cfg['command']} [ставка] — {game_type} {cfg['emoji']}\n"
-    text += "\nПример: `/куб 100`"
-    await call.message.edit_text(text)
+    text = "👥 **Игра с игроками**\n\n⬇️ <b>Выберите игру:</b>"
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=pvp_game_selection_kb())
     await call.answer()
 
 
@@ -213,27 +206,16 @@ async def cb_casino_blackjack_info(call: CallbackQuery):
             "1. Добавьте бота в группу: `@{}`\n"
             "2. Напишите в группе: `/блекджек 50`\n"
             "3. Игроки нажимают «Присоединиться»\n"
-            "4. Создатель нажимает «Старт»\n\n"
+            "4. Создатель нажимает «Старт» для начала\n\n"
             "Правила: наберите 21 или близко к 21, не перебирая. "
             "До 6 игроков за столом. Каждый играет против дилера."
         ).format(bot_username)
         await call.message.edit_text(text)
     else:
         text = (
-            "🃏 **Блэкджек**\n\n"
-            "Правила:\n"
-            "• Каждый игрок получает 2 карты, дилер — 2 (1 открыта)\n"
-            "• Нужно набрать сумму очков как можно ближе к 21\n"
-            "• Можно брать ещё карты (Hit) или остановиться (Stand)\n"
-            "• Дилер обязан брать карты до 17+\n"
-            "• Кто перебрал (>21) — проиграл\n\n"
-            "Как играть:\n"
-            "/блекджек [ставка] — создать стол в группе\n"
-            "Игроки нажимают «Присоединиться»\n"
-            "Создатель нажимает «Старт» для начала\n"
-            "До 6 игроков за одним столом"
+            "🃏 **Блэкджек**\n\n⬇️ <b>Выберите ставку:</b>"
         )
-        await call.message.edit_text(text)
+        await call.message.edit_text(text, parse_mode="HTML", reply_markup=blackjack_bet_kb())
     await call.answer()
 
 

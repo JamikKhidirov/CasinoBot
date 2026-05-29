@@ -108,6 +108,20 @@ def can_read_chats(uid: int) -> bool:
         return False
 
 
+def resolve_user(text: str) -> int | None:
+    """Resolve @username or numeric ID to user_id."""
+    text = text.strip()
+    if text.isdigit():
+        return int(text)
+    username = text[1:].lower() if text.startswith("@") else text.lower()
+    try:
+        db.cur.execute("SELECT user_id FROM users WHERE LOWER(username) = ?", (username,))
+        row = db.cur.fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
 def strip_html(text: str) -> str:
     """Remove all HTML tags from string for safe Telegram display."""
     return re.sub(r'<[^>]+>', '', text)

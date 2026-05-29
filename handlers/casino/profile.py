@@ -6,6 +6,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from utils.helpers import resolve_user
 from .base import (
     get_bot, get_db, get_user, create_user, update_balance, update_blackjack_balance, get_username,
     is_casino_admin, has_perm, is_owner, get_users_with_perm,
@@ -28,12 +29,8 @@ async def cmd_profile(message: Message):
         await message.reply("ℹ️ Для просмотра профиля и пополнения баланса перейдите в личные сообщения с ботом.")
         return
 
-    bj_bal = user.get("blackjack_balance")
-    if bj_bal is None:
-        bj_bal = INITIAL_BLACKJACK_BALANCE
-    bbot = user.get("bot_balance")
-    if bbot is None:
-        bbot = INITIAL_BOT_BALANCE
+    bj_bal = user["blackjack_balance"] if user["blackjack_balance"] is not None else INITIAL_BLACKJACK_BALANCE
+    bbot = user["bot_balance"] if user["bot_balance"] is not None else INITIAL_BOT_BALANCE
     text = (
         f"<b>📊 Профиль игрока</b> {message.from_user.first_name}\n\n"
         f"┃ 🆔 ID: <code>{user['user_id']}</code>\n"
@@ -419,11 +416,14 @@ async def cmd_admin_add_balance(message: Message):
         await message.reply("❌ Формат: <code>/пополнить user_id сумма</code>")
         return
 
+    user_id = resolve_user(parts[1])
+    if user_id is None:
+        await message.reply("❌ Пользователь не найден. Укажите ID или @username.")
+        return
     try:
-        user_id = int(parts[1])
         amount = int(parts[2])
-    except (ValueError, IndexError):
-        await message.reply("❌ Формат: <code>/пополнить user_id сумма</code>")
+    except ValueError:
+        await message.reply("❌ Некорректная сумма.")
         return
 
     await update_balance(user_id, amount, "admin_add")

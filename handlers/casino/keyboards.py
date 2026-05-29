@@ -3,7 +3,7 @@ from typing import Optional
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from .base import ADMIN_ID
+from .base import ADMIN_ID, GAMES_CONFIG
 
 
 def game_keyboard(room_id: str, creator_id: int, label: str = "🎮 Присоединиться к игре") -> InlineKeyboardMarkup:
@@ -57,6 +57,65 @@ def casino_menu_kb(user_id: Optional[int] = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def blackjack_bet_kb() -> InlineKeyboardMarkup:
+    bets = [10, 50, 100, 500, 1000]
+    row = []
+    buttons = []
+    for bet in bets:
+        row.append(InlineKeyboardButton(
+            text=f"{bet}🪙",
+            callback_data=f"casino_bj_bet_{bet}"
+        ))
+        if len(row) == 3:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append([
+        InlineKeyboardButton(text="✏️ Своя сумма", callback_data="casino_bj_bet_custom")
+    ])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="casino_games")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def solo_game_selection_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for gt, cfg in GAMES_CONFIG.items():
+        builder.button(text=f"{cfg['emoji']} {gt.capitalize()}", callback_data=f"casino_solo_pick_{gt}")
+    builder.adjust(2)
+    builder.row(
+        InlineKeyboardButton(text="👥 С игроками", callback_data="casino_play_pvp"),
+        InlineKeyboardButton(text="🃏 Блэкджек", callback_data="casino_blackjack_info"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="◀️ Назад", callback_data="casino_games"),
+    )
+    return builder.as_markup()
+
+
+def solo_bet_selection_kb(game_type: str) -> InlineKeyboardMarkup:
+    bets = [10, 50, 100, 500, 1000]
+    row = []
+    buttons = []
+    for bet in bets:
+        row.append(InlineKeyboardButton(
+            text=f"{bet}🪙",
+            callback_data=f"casino_solo_bet_{game_type}_{bet}"
+        ))
+        if len(row) == 3:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append([
+        InlineKeyboardButton(
+            text="✏️ Своя сумма", callback_data=f"casino_solo_bet_{game_type}_custom"
+        )
+    ])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="casino_play_bot")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def game_selection_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -68,6 +127,21 @@ def game_selection_kb() -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(text="◀️ Назад", callback_data="casino_menu"),
+    )
+    return builder.as_markup()
+
+
+def pvp_game_selection_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for gt, cfg in GAMES_CONFIG.items():
+        builder.button(text=f"{cfg['emoji']} {gt.capitalize()}", callback_data=f"casino_pick_game_{gt}")
+    builder.adjust(2)
+    builder.row(
+        InlineKeyboardButton(text="🃏 Блэкджек", callback_data="casino_blackjack_info"),
+        InlineKeyboardButton(text="🤖 С ботом", callback_data="casino_play_bot"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="◀️ Назад", callback_data="casino_games"),
     )
     return builder.as_markup()
 

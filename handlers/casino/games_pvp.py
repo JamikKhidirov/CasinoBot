@@ -9,10 +9,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from .base import (
-    get_bot, get_db, get_user, create_user, update_balance, get_username,
-    GAMES_CONFIG, GameRoom, active_games, active_games_lock,
-    GameStates, COMMISSION_RATE, logger,
+    get_bot, get_db, get_user, create_user, update_balance, update_blackjack_balance, get_username,
+    GAMES_CONFIG, GameRoom, BlackjackRoom, active_games, active_blackjack_games, active_games_lock,
+    GameStates, COMMISSION_RATE, INITIAL_BLACKJACK_BALANCE, logger,
 )
+from .keyboards import blackjack_join_keyboard
 
 router = Router()
 
@@ -735,7 +736,42 @@ async def process_custom_bet(message: Message, state: FSMContext):
         await message.answer("❌ Введите целое число!")
         return
 
+    if bet < 10:
+        await message.answer("❌ Минимальная ставка — 10!")
+        return
+
     await state.clear()
+
+    if game_type == "blackjack":
+        if message.chat.type == "private":
+            await message.answer("❌ Блэкджек только в группах!")
+            return
+        user = await get_user(message.from_user.id)
+        if not user:
+            await create_user(message.from_user)
+            user = await get_user(message.from_user.id)
+        bj_bal = user["blackjack_balance"] if user["blackjack_balance"] is not None else INITIAL_BLACKJACK_BALANCE
+        if bj_bal < bet:
+            await message.answer(f"❌ Недостаточно средств! Баланс: {bj_bal}")
+            return
+        await update_blackjack_balance(message.from_user.id, -bet, "bj_reserve")
+        room_id = f"bj-{uuid.uuid4()}"
+        game = BlackjackRoom(room_id, bet, message.from_user.id, message.chat.id)
+        game.players[message.from_user.id] = []
+        game.player_names[message.from_user.id] = await get_username(message.from_user.id)
+        async with active_games_lock:
+            active_blackjack_games[room_id] = game
+        sent = await message.answer(
+            f"🃏 **Блэкджек**\n"
+            f"💵 Ставка: {bet} 🪙\n"
+            f"👤 {game.player_names[message.from_user.id]} (создатель)\n"
+            f"👥 Места: 1/6\n\n"
+            f"⏳ Ожидание игроков...",
+            reply_markup=blackjack_join_keyboard(room_id),
+        )
+        game.message_id = sent.message_id
+        return
+
     await create_game_for_user(message, message.from_user, message.from_user.id, game_type, bet)
 
 

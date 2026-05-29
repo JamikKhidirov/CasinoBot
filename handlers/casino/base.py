@@ -75,6 +75,10 @@ class MuteState(StatesGroup):
     waiting_for_details = State()
 
 
+class SoloBetState(StatesGroup):
+    waiting_for_bet = State()
+
+
 async def get_db() -> aiosqlite.Connection:
     conn = await aiosqlite.connect(DB_NAME)
     conn.row_factory = aiosqlite.Row

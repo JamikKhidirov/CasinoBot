@@ -4,7 +4,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from utils.helpers import (
     is_admin, is_banned, is_muted, get_warns, add_warn,
     ban_user, unban_user, mute_user, unmute_user, can_moderate, get_username_safe,
-    can_read_chats
+    can_read_chats, resolve_user
 )
 from handlers.user import active_users, waiting_users
 import db
@@ -289,17 +289,15 @@ async def cmd_ban(message: Message):
     if len(parts) < 2:
         await message.answer("❌ Формат: <code>/ban user_id [причина]</code>", parse_mode="HTML")
         return
-    try:
-        target_id = int(parts[1])
-    except ValueError:
-        await message.answer("❌ Некорректный ID.")
+    target_id = resolve_user(parts[1])
+    if target_id is None:
+        await message.answer("❌ Пользователь не найден. Укажите ID или @username.")
         return
     if not can_moderate(message.from_user.id, target_id):
         await message.answer("❌ Вы не можете забанить этого пользователя.")
         return
     reason = parts[2] if len(parts) > 2 else "Нарушение правил"
     ban_user(target_id, message.from_user.id, reason)
-    # Also remove from active chats
     if target_id in active_users:
         partner = active_users.pop(target_id)
         active_users.pop(partner, None)
@@ -317,10 +315,9 @@ async def cmd_unban(message: Message):
     if len(parts) < 2:
         await message.answer("❌ Формат: <code>/unban user_id</code>", parse_mode="HTML")
         return
-    try:
-        target_id = int(parts[1])
-    except ValueError:
-        await message.answer("❌ Некорректный ID.")
+    target_id = resolve_user(parts[1])
+    if target_id is None:
+        await message.answer("❌ Пользователь не найден. Укажите ID или @username.")
         return
     if not can_moderate(message.from_user.id, target_id):
         await message.answer("❌ Вы не можете разбанить этого пользователя.")
@@ -338,11 +335,14 @@ async def cmd_mute(message: Message):
     if len(parts) < 3:
         await message.answer("❌ Формат: <code>/mute user_id минуты</code>\nПример: <code>/mute 123456789 30</code>", parse_mode="HTML")
         return
+    target_id = resolve_user(parts[1])
+    if target_id is None:
+        await message.answer("❌ Пользователь не найден. Укажите ID или @username.")
+        return
     try:
-        target_id = int(parts[1])
         minutes = int(parts[2])
     except ValueError:
-        await message.answer("❌ Некорректный ID или время.")
+        await message.answer("❌ Некорректное время.")
         return
     if not can_moderate(message.from_user.id, target_id):
         await message.answer("❌ Вы не можете замутить этого пользователя.")
@@ -360,10 +360,9 @@ async def cmd_unmute(message: Message):
     if len(parts) < 2:
         await message.answer("❌ Формат: <code>/unmute user_id</code>", parse_mode="HTML")
         return
-    try:
-        target_id = int(parts[1])
-    except ValueError:
-        await message.answer("❌ Некорректный ID.")
+    target_id = resolve_user(parts[1])
+    if target_id is None:
+        await message.answer("❌ Пользователь не найден. Укажите ID или @username.")
         return
     if not can_moderate(message.from_user.id, target_id):
         await message.answer("❌ Вы не можете размутить этого пользователя.")
@@ -381,10 +380,9 @@ async def cmd_warn(message: Message):
     if len(parts) < 2:
         await message.answer("❌ Формат: <code>/warn user_id [причина]</code>", parse_mode="HTML")
         return
-    try:
-        target_id = int(parts[1])
-    except ValueError:
-        await message.answer("❌ Некорректный ID.")
+    target_id = resolve_user(parts[1])
+    if target_id is None:
+        await message.answer("❌ Пользователь не найден. Укажите ID или @username.")
         return
     if not can_moderate(message.from_user.id, target_id):
         await message.answer("❌ Вы не можете варнуть этого пользователя.")
@@ -408,10 +406,9 @@ async def cmd_check(message: Message):
     if len(parts) < 2:
         await message.answer("❌ Формат: <code>/check user_id</code>", parse_mode="HTML")
         return
-    try:
-        target_id = int(parts[1])
-    except ValueError:
-        await message.answer("❌ Некорректный ID.")
+    target_id = resolve_user(parts[1])
+    if target_id is None:
+        await message.answer("❌ Пользователь не найден. Укажите ID или @username.")
         return
     name = get_username_safe(target_id)
     banned = "🚫 Да" if is_banned(target_id) else "✅ Нет"
@@ -449,12 +446,16 @@ async def cmd_chatlog(message: Message):
     if len(parts) < 2:
         await message.answer("❌ Формат: <code>/chatlog user_id</code>\nИли: <code>/chatlog user1 user2</code>", parse_mode="HTML")
         return
-    try:
-        target_id = int(parts[1])
-        target_id2 = int(parts[2]) if len(parts) > 2 else None
-    except ValueError:
-        await message.answer("❌ Некорректный ID.")
+    target_id = resolve_user(parts[1])
+    if target_id is None:
+        await message.answer("❌ Пользователь не найден. Укажите ID или @username.")
         return
+    target_id2 = None
+    if len(parts) > 2:
+        target_id2 = await resolve_user(parts[2])
+        if target_id2 is None:
+            await message.answer("❌ Второй пользователь не найден. Укажите ID или @username.")
+            return
 
     if target_id2:
         query = "SELECT sender_id, message, timestamp FROM messages WHERE ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)) ORDER BY timestamp ASC LIMIT 50"
@@ -494,10 +495,9 @@ async def cmd_warns(message: Message):
     if len(parts) < 2:
         await message.answer("❌ Формат: <code>/warns user_id</code>", parse_mode="HTML")
         return
-    try:
-        target_id = int(parts[1])
-    except ValueError:
-        await message.answer("❌ Некорректный ID.")
+    target_id = resolve_user(parts[1])
+    if target_id is None:
+        await message.answer("❌ Пользователь не найден. Укажите ID или @username.")
         return
     warns = get_warns(target_id)
     await message.answer(f"⚠️ Варны пользователя <code>{target_id}</code>: {warns}/3", parse_mode="HTML")

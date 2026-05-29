@@ -4,12 +4,14 @@ import random
 
 from aiogram import F, Router
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from .base import (
     get_bot, get_db, get_user, create_user, update_bot_balance, get_username,
-    GAMES_CONFIG, INITIAL_BOT_BALANCE, logger,
+    GAMES_CONFIG, INITIAL_BOT_BALANCE, SoloBetState, logger,
 )
+from .keyboards import solo_bet_selection_kb
 
 router = Router()
 
@@ -59,7 +61,16 @@ async def cmd_solo_bot(message: Message):
         await create_user(message.from_user)
         user = await get_user(message.from_user.id)
 
-    bal = user.get("bot_balance")
+    await solo_game_play(message, game_type, bet)
+
+
+async def solo_game_play(message: Message, game_type: str, bet: int):
+    user = await get_user(message.from_user.id)
+    if not user:
+        await create_user(message.from_user)
+        user = await get_user(message.from_user.id)
+
+    bal = user["bot_balance"]
     if bal is None:
         bal = INITIAL_BOT_BALANCE
     if bal < bet:
@@ -91,19 +102,10 @@ async def cmd_solo_bot(message: Message):
         f"🤖 Бот: {bot_adjusted}"
     )
 
-    winner = None
     if player_adjusted > bot_adjusted:
-        winner = message.from_user.id
         prize = bet * 2
         await update_bot_balance(message.from_user.id, prize, "solo_win")
         await message.answer(f"🏆 **Вы выиграли!** +{prize} монет")
-    elif bot_adjusted > player_adjusted:
-        await message.answer(f"❌ **Бот выиграл!** -{bet} монет")
-    else:
-        await update_bot_balance(message.from_user.id, bet, "solo_tie")
-        await message.answer(f"🎭 **Ничья!** Ставка возвращена.")
-
-    if winner:
         conn = await get_db()
         try:
             await conn.execute(
@@ -116,3 +118,91 @@ async def cmd_solo_bot(message: Message):
             pass
         finally:
             await conn.close()
+    elif bot_adjusted > player_adjusted:
+        await message.answer(f"❌ **Бот выиграл!** -{bet} монет")
+    else:
+        await update_bot_balance(message.from_user.id, bet, "solo_tie")
+        await message.answer(f"🎭 **Ничья!** Ставка возвращена.")
+
+
+@router.callback_query(F.data.startswith("casino_solo_pick_"))
+async def cb_casino_solo_pick(call: CallbackQuery):
+    if call.message.chat.type != "private":
+        await call.answer("❌ Игра с ботом только в ЛС!", show_alert=True)
+        return
+    parts = call.data.split("_", 3)
+    game_type = parts[3]
+    if game_type not in GAMES_CONFIG:
+        await call.answer("❌ Игра не найдена!", show_alert=True)
+        return
+    cfg = GAMES_CONFIG[game_type]
+    await call.message.edit_text(
+        f"<b>{cfg['emoji']} {game_type.capitalize()} — с ботом</b>\n\n"
+        f"Выберите ставку:",
+        parse_mode="HTML",
+        reply_markup=solo_bet_selection_kb(game_type),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("casino_solo_bet_"))
+async def cb_casino_solo_bet(call: CallbackQuery, state: FSMContext):
+    if call.message.chat.type != "private":
+        await call.answer("❌ Игра с ботом только в ЛС!", show_alert=True)
+        return
+    parts = call.data.split("_", 3)
+    remaining = parts[3]
+    game_type, bet_str = remaining.split("_", 1)
+
+    if game_type not in GAMES_CONFIG:
+        await call.answer("❌ Игра не найдена!", show_alert=True)
+        return
+
+    if bet_str == "custom":
+        await state.set_state(SoloBetState.waiting_for_bet)
+        await state.update_data(game_type=game_type)
+        await call.message.edit_text("💰 Введите сумму ставки (от 10):")
+        await call.answer()
+        return
+
+    try:
+        bet = int(bet_str)
+    except ValueError:
+        await call.answer("❌ Некорректная ставка!", show_alert=True)
+        return
+
+    if bet < 10:
+        await call.answer("❌ Минимальная ставка — 10!", show_alert=True)
+        return
+
+    await call.message.delete()
+    await call.answer()
+    await solo_game_play(call.message, game_type, bet)
+
+
+@router.message(SoloBetState.waiting_for_bet)
+async def process_solo_custom_bet(message: Message, state: FSMContext):
+    text = message.text.strip()
+    if text.startswith("/"):
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    game_type = data.get("game_type")
+    if not game_type:
+        await message.answer("❌ Ошибка: не выбран тип игры.")
+        await state.clear()
+        return
+
+    try:
+        bet = int(text)
+    except ValueError:
+        await message.answer("❌ Введите целое число!")
+        return
+
+    if bet < 10:
+        await message.answer("❌ Минимальная ставка — 10!")
+        return
+
+    await state.clear()
+    await solo_game_play(message, game_type, bet)
