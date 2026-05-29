@@ -215,6 +215,11 @@ async def cb_casino_unlock(call: CallbackQuery):
     await call.answer()
 
 
+@router.callback_query(F.data == "games_menu")
+async def cb_games_menu(call: CallbackQuery):
+    await cb_casino_games(call)
+
+
 @router.callback_query(F.data == "casino_play_bot")
 async def cb_casino_play_bot(call: CallbackQuery):
     if call.message.chat.type != "private":

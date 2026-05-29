@@ -2,11 +2,11 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from .base import (
     get_bot, get_db, get_user, create_user, update_balance, update_bot_balance, get_username,
-    is_casino_admin, has_perm, get_admin_perms, ADMIN_ID, PERMISSIONS, AdminAction, logger,
+    is_casino_admin, is_owner, has_perm, get_admin_perms, ADMIN_ID, PERMISSIONS, AdminAction, logger,
 )
 from .keyboards import casino_admin_kb
 from utils.helpers import resolve_user, ban_user, unban_user, mute_user, unmute_user, add_warn, get_warns, is_banned, is_muted, can_moderate
@@ -60,7 +60,6 @@ async def cb_casino_admin_players(call: CallbackQuery):
         lines.append(f"┣ {name}\n┃ 🆔 <code>{p['user_id']}</code> | 💰 {p['balance']} 🪙")
     if len(players) > 20:
         lines.append(f"\n┃ <i>...и ещё {len(players) - 20} игроков</i>")
-    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
     await call.message.edit_text(
         "\n".join(lines),
         parse_mode="HTML",
@@ -68,6 +67,311 @@ async def cb_casino_admin_players(call: CallbackQuery):
             [InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin")]
         ])
     )
+    await call.answer()
+
+
+# ---------- ADD PVP BALANCE ----------
+class AdminAddPVPState(StatesGroup):
+    waiting_user_id = State()
+    waiting_amount = State()
+
+
+@router.callback_query(F.data == "casino_admin_add")
+async def cb_casino_admin_add(call: CallbackQuery, state: FSMContext):
+    uid = call.from_user.id
+    if not await has_perm(uid, "add_balance"):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    await state.set_state(AdminAddPVPState.waiting_user_id)
+    await call.message.edit_text("💰 Введите ID или @username пользователя для пополнения PVP баланса:")
+    await call.answer()
+
+
+@router.message(AdminAddPVPState.waiting_user_id)
+async def process_admin_add_pvp_user(message: Message, state: FSMContext):
+    target_id = resolve_user(message.text)
+    if target_id is None:
+        await message.answer("❌ Пользователь не найден. Укажите числовой ID или @username.")
+        return
+    await state.update_data(target_id=target_id)
+    await state.set_state(AdminAddPVPState.waiting_amount)
+    await message.answer(f"💰 Введите сумму для пополнения PVP баланса пользователю <code>{target_id}</code>:", parse_mode="HTML")
+
+
+@router.message(AdminAddPVPState.waiting_amount)
+async def process_admin_add_pvp_amount(message: Message, state: FSMContext):
+    data = await state.get_data()
+    target_id = data.get("target_id")
+    try:
+        amount = int(message.text.strip())
+    except ValueError:
+        await message.answer("❌ Введите целое число!")
+        return
+    if amount < 1:
+        await message.answer("❌ Сумма должна быть больше 0.")
+        return
+    await update_balance(target_id, amount, "admin_add")
+    await state.clear()
+    await message.answer(f"✅ PVP баланс пользователя <code>{target_id}</code> пополнен на <b>{amount}</b> монет!", parse_mode="HTML")
+    try:
+        admin_name = message.from_user.username or "Администратор"
+        await get_bot().send_message(
+            target_id,
+            f"💰 <b>Баланс пополнен!</b>\n\n+{amount} 🪙\nПополнил: @{admin_name}",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+
+# ---------- PROMOCODES ----------
+class AdminPromoState(StatesGroup):
+    waiting_code = State()
+    waiting_amount = State()
+
+
+class AdminPromoDeleteState(StatesGroup):
+    waiting_code = State()
+
+
+@router.callback_query(F.data == "casino_admin_promos")
+async def cb_casino_admin_promos(call: CallbackQuery):
+    uid = call.from_user.id
+    if not await has_perm(uid, "create_promos"):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    conn = await get_db()
+    try:
+        cursor = await conn.execute("SELECT * FROM promocodes ORDER BY created_at DESC")
+        promos = await cursor.fetchall()
+    finally:
+        await conn.close()
+
+    lines = ["<b>🎟 Промокоды</b>\n\n"]
+    if not promos:
+        lines.append("Нет созданных промокодов.\n")
+    else:
+        for p in promos:
+            conn2 = await get_db()
+            try:
+                cur2 = await conn2.execute(
+                    "SELECT COUNT(*) as cnt FROM promo_activations WHERE code = ?", (p["code"],)
+                )
+                cnt_row = await cur2.fetchone()
+                activations = cnt_row["cnt"] if cnt_row else 0
+            finally:
+                await conn2.close()
+            lines.append(f"┃ <code>{p['code']}</code> — {p['amount']} 🪙  |  активаций: {activations}\n")
+
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Создать промо", callback_data="casino_admin_create_promo")],
+        [InlineKeyboardButton(text="❌ Удалить промо", callback_data="casino_admin_delete_promo")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin")],
+    ])
+    await call.message.edit_text("".join(lines), parse_mode="HTML", reply_markup=markup)
+    await call.answer()
+
+
+@router.callback_query(F.data == "casino_admin_create_promo")
+async def cb_casino_admin_create_promo(call: CallbackQuery, state: FSMContext):
+    if not await has_perm(call.from_user.id, "create_promos"):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    await state.set_state(AdminPromoState.waiting_code)
+    await call.message.edit_text("🎟 Введите код промокода (латиница и цифры):")
+    await call.answer()
+
+
+@router.message(AdminPromoState.waiting_code)
+async def process_promo_code(message: Message, state: FSMContext):
+    code = message.text.strip().upper()
+    if not code.isalnum():
+        await message.answer("❌ Код должен содержать только буквы и цифры.")
+        return
+    await state.update_data(code=code)
+    await state.set_state(AdminPromoState.waiting_amount)
+    await message.answer(f"💰 Введите сумму для промокода <code>{code}</code>:", parse_mode="HTML")
+
+
+@router.message(AdminPromoState.waiting_amount)
+async def process_promo_amount(message: Message, state: FSMContext):
+    data = await state.get_data()
+    code = data["code"]
+    try:
+        amount = int(message.text.strip())
+    except ValueError:
+        await message.answer("❌ Введите целое число!")
+        return
+    if amount < 1:
+        await message.answer("❌ Сумма должна быть больше 0.")
+        return
+    conn = await get_db()
+    try:
+        cursor = await conn.execute("SELECT 1 FROM promocodes WHERE code = ?", (code,))
+        if await cursor.fetchone():
+            await message.answer(f"❌ Промокод <code>{code}</code> уже существует.")
+            await state.clear()
+            return
+        from datetime import datetime
+        await conn.execute(
+            "INSERT INTO promocodes (code, amount, created_by, created_at) VALUES (?, ?, ?, ?)",
+            (code, amount, message.from_user.id, datetime.now().isoformat()),
+        )
+        await conn.commit()
+    finally:
+        await conn.close()
+    await state.clear()
+    await message.answer(f"✅ Промокод <code>{code}</code> на <b>{amount}</b> монет создан!", parse_mode="HTML")
+
+
+@router.callback_query(F.data == "casino_admin_delete_promo")
+async def cb_casino_admin_delete_promo(call: CallbackQuery, state: FSMContext):
+    if not await has_perm(call.from_user.id, "create_promos"):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    await state.set_state(AdminPromoDeleteState.waiting_code)
+    await call.message.edit_text("❌ Введите код промокода для удаления:")
+    await call.answer()
+
+
+@router.message(AdminPromoDeleteState.waiting_code)
+async def process_delete_promo(message: Message, state: FSMContext):
+    code = message.text.strip().upper()
+    conn = await get_db()
+    try:
+        await conn.execute("DELETE FROM promocodes WHERE code = ?", (code,))
+        await conn.commit()
+    finally:
+        await conn.close()
+    await state.clear()
+    await message.answer(f"✅ Промокод <code>{code}</code> удалён.", parse_mode="HTML")
+
+
+# ---------- ADMIN MANAGEMENT ----------
+class AdminManageState(StatesGroup):
+    waiting_target = State()
+
+
+@router.callback_query(F.data == "casino_admin_manage")
+async def cb_casino_admin_manage(call: CallbackQuery):
+    uid = call.from_user.id
+    if not is_owner(uid):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT a.admin_id, a.added_at, COALESCE(u.username, '?') as username "
+            "FROM casino_admins a LEFT JOIN users u ON a.admin_id = u.user_id ORDER BY a.added_at"
+        )
+        admins = await cursor.fetchall()
+    finally:
+        await conn.close()
+
+    lines = ["<b>👑 Управление админами казино</b>\n\n"]
+    if not admins:
+        lines.append("Нет добавленных администраторов.\n")
+    else:
+        for a in admins:
+            name = f"@{a['username']}" if a["username"] and a["username"] != "?" else f"ID {a['admin_id']}"
+            lines.append(f"┃ {name}  |  🆔 <code>{a['admin_id']}</code>\n")
+
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Добавить админа", callback_data="casino_admin_add_admin")],
+        [InlineKeyboardButton(text="➖ Удалить админа", callback_data="casino_admin_remove_admin")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin")],
+    ])
+    await call.message.edit_text("".join(lines), parse_mode="HTML", reply_markup=markup)
+    await call.answer()
+
+
+@router.callback_query(F.data == "casino_admin_add_admin")
+async def cb_casino_admin_add_admin(call: CallbackQuery, state: FSMContext):
+    if not is_owner(call.from_user.id):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    await state.set_state(AdminManageState.waiting_target)
+    await state.update_data(action="add_admin")
+    await call.message.edit_text("➕ Введите ID или @username пользователя для добавления в админы:")
+    await call.answer()
+
+
+@router.callback_query(F.data == "casino_admin_remove_admin")
+async def cb_casino_admin_remove_admin(call: CallbackQuery, state: FSMContext):
+    if not is_owner(call.from_user.id):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    await state.set_state(AdminManageState.waiting_target)
+    await state.update_data(action="remove_admin")
+    await call.message.edit_text("➖ Введите ID или @username пользователя для удаления из админов:")
+    await call.answer()
+
+
+@router.message(AdminManageState.waiting_target)
+async def process_admin_manage_target(message: Message, state: FSMContext):
+    data = await state.get_data()
+    action = data.get("action")
+    target_id = resolve_user(message.text)
+    if target_id is None:
+        await message.answer("❌ Пользователь не найден. Укажите числовой ID или @username.")
+        return
+
+    conn = await get_db()
+    try:
+        if action == "add_admin":
+            cursor = await conn.execute("SELECT 1 FROM casino_admins WHERE admin_id = ?", (target_id,))
+            if await cursor.fetchone():
+                await message.answer(f"❌ Пользователь <code>{target_id}</code> уже является админом.")
+                await state.clear()
+                return
+            from datetime import datetime
+            await conn.execute(
+                "INSERT INTO casino_admins (admin_id, added_by, added_at) VALUES (?, ?, ?)",
+                (target_id, message.from_user.id, datetime.now().isoformat()),
+            )
+            await conn.commit()
+            await message.answer(f"✅ Пользователь <code>{target_id}</code> назначен администратором казино!")
+        elif action == "remove_admin":
+            await conn.execute("DELETE FROM casino_admins WHERE admin_id = ?", (target_id,))
+            await conn.execute("DELETE FROM admin_permissions WHERE admin_id = ?", (target_id,))
+            await conn.commit()
+            await message.answer(f"✅ Администратор <code>{target_id}</code> удалён.")
+    finally:
+        await conn.close()
+    await state.clear()
+
+
+# ---------- ADMIN HELP ----------
+@router.callback_query(F.data == "casino_admin_help")
+async def cb_casino_admin_help(call: CallbackQuery):
+    uid = call.from_user.id
+    if not await is_casino_admin(uid):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    text = (
+        "<b>📖 Команды администратора казино</b>\n\n"
+        "<b>Управление балансом:</b>\n"
+        "┃ <code>/пополнить @user сумма</code> — пополнить PVP баланс\n"
+        "┃ <code>/addbotcoins @user сумма</code> — пополнить счёт (бот)\n\n"
+        "<b>Промокоды:</b>\n"
+        "┃ <code>/createpromo КОД сумма</code> — создать промокод\n"
+        "┃ <code>/deletepromo КОД</code> — удалить промокод\n"
+        "┃ <code>/promo_list</code> — список всех промокодов\n"
+        "┃ <code>/promo КОД</code> — активировать промокод\n\n"
+        "<b>Запросы:</b>\n"
+        "┃ <code>/выводы</code> — просмотр запросов на вывод\n"
+        "┃ <code>/одобрить ID</code> — одобрить депозит\n\n"
+        "<b>Игроки:</b>\n"
+        "┃ <code>/игроки</code> — список всех игроков\n"
+        "┃ <code>/solotop</code> — топ соло-казино\n\n"
+        "<b>Модерация:</b>\n"
+        "┃ Кнопки 🚫🔇⚠️📋 в админ-панели\n\n"
+        "💡 Все команды также доступны через админ-панель (кнопки выше)."
+    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin")]
+    ])
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
     await call.answer()
 
 
