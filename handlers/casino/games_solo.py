@@ -107,21 +107,41 @@ async def solo_game_play(message: Message, game_type: str, bet: int):
     bot_adjusted = bot_dice - 1 if game_type in ("дротики", "боулинг") else bot_dice
     player_adjusted = player_dice.dice.value - 1 if game_type in ("дротики", "боулинг") else player_dice.dice.value
 
-    bot_name = "🤖 Бот"
+    def result_label(val: int) -> str:
+        if game_type == "футбол":
+            return "⚽ ГОЛ!" if val > 3 else "❌ Промах"
+        if game_type == "баскетбол":
+            return "🏀 Попадание!" if val > 3 else "❌ Промах"
+        return str(val)
+
+    player_label = result_label(player_adjusted)
+    bot_label = result_label(bot_adjusted)
 
     await msg.edit_text(
         f"🤖 <b>Игра с ботом</b> {config['emoji']}\n"
         f"💵 Ставка: {bet} монет\n\n"
-        f"{player_tag}: {player_adjusted}\n"
-        f"{bot_name}: {bot_adjusted}"
+        f"{player_tag}: {player_label}\n"
+        f"🤖 Бот: {bot_label}"
     )
 
     await asyncio.sleep(1)
     new_user = await get_user(message.from_user.id)
     new_bal = new_user["bot_balance"] if new_user else bal
 
+    def is_player_win() -> str:
+        if game_type in ("футбол", "баскетбол"):
+            p_hit = player_adjusted > 3
+            b_hit = bot_adjusted > 3
+            if p_hit and not b_hit: return "win"
+            if b_hit and not p_hit: return "lose"
+            return "tie"
+        if player_adjusted > bot_adjusted: return "win"
+        if bot_adjusted > player_adjusted: return "lose"
+        return "tie"
+
     conn = None
-    if player_adjusted > bot_adjusted:
+    result = is_player_win()
+    if result == "win":
         prize = bet * 2
         await update_bot_balance(message.from_user.id, prize, "solo_win")
         await message.answer(
@@ -138,7 +158,7 @@ async def solo_game_play(message: Message, game_type: str, bet: int):
             await conn.commit()
         except Exception:
             pass
-    elif bot_adjusted > player_adjusted:
+    elif result == "lose":
         await update_bot_balance(message.from_user.id, 0, "solo_lose")
         await message.answer(
             f"❌ <b>Бот выиграл!</b> -{bet} монет\n"
