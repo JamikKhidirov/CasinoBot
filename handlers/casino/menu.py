@@ -115,9 +115,12 @@ async def cb_casino_top_pvp(call: CallbackQuery):
     else:
         text = "<b>🏆 Топ 10 казино (PVP)</b>\n\n"
         for i, row in enumerate(rows, 1):
-            name = row["username"] or f"user_{row['user_id']}"
             medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "▫️"
-            text += f"{medal} <b>{i}.</b> @{name}  →  {row['balance']} 🪙\n"
+            if row["username"]:
+                display = f"@{row['username']}"
+            else:
+                display = f"ID {row['user_id']}"
+            text += f"{medal} <b>{i}.</b> {display}  →  {row['balance']} 🪙\n"
         await call.message.answer(text, parse_mode="HTML")
     await call.answer()
 
@@ -138,10 +141,13 @@ async def cb_casino_top_solo(call: CallbackQuery):
         return
     text = "<b>⭐ Топ 10 соло-казино</b>\n\n"
     for i, row in enumerate(rows, 1):
-        name = row["username"] or f"user_{row['user_id']}"
         medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "▫️"
+        if row["username"]:
+            display = row["username"]
+        else:
+            display = f"ID {row['user_id']}"
         avg = round(row["score"] / row["games_played"], 1) if row["games_played"] else 0
-        text += f"{medal} <b>{i}.</b> {name}  →  {row['score']} ⭐  ({row['games_played']} игр, ср. {avg})\n"
+        text += f"{medal} <b>{i}.</b> {display}  →  {row['score']} ⭐  ({row['games_played']} игр, ср. {avg})\n"
     await call.message.answer(text, parse_mode="HTML")
     await call.answer()
 

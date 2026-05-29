@@ -80,7 +80,7 @@ async def solo_game_play(message: Message, game_type: str, bet: int):
     await update_bot_balance(message.from_user.id, -bet, "solo_reserve")
 
     config = GAMES_CONFIG[game_type]
-    player_name = await get_username(message.from_user.id)
+    player_name = message.from_user.first_name or f"Игрок {message.from_user.id}"
 
     msg = await message.reply(
         f"🎲 <b>Игра с ботом</b> {config['emoji']}!\n"
