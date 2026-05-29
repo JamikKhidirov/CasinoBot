@@ -135,9 +135,7 @@ async def cb_bj_join(call: CallbackQuery):
             await create_user(call.from_user)
             user = await get_user(call.from_user.id)
 
-        bj_bal = user.get("blackjack_balance")
-        if bj_bal is None:
-            bj_bal = INITIAL_BLACKJACK_BALANCE
+        bj_bal = user["blackjack_balance"] if user["blackjack_balance"] is not None else INITIAL_BLACKJACK_BALANCE
         if bj_bal < game.bet:
             await call.answer("❌ Недостаточно средств для блэкджека!", show_alert=True)
             return
@@ -427,13 +425,16 @@ async def cb_casino_bj_bet(call: CallbackQuery, state: FSMContext):
         active_blackjack_games[room_id] = game
 
     sent = await call.message.answer(
-        f"🃏 **Блэкджек**\n"
+        f"🃏 **Блэкджек стол!**\n"
         f"💵 Ставка: {bet} 🪙\n"
         f"👤 {game.player_names[call.from_user.id]} (создатель)\n"
         f"👥 Места: 1/6\n\n"
-        f"⏳ Ожидание игроков...",
+        f"⏳ Ожидание игроков...\n\n"
+        f"Нажмите «Присоединиться» или «Старт» для начала.",
         reply_markup=blackjack_join_keyboard(room_id),
     )
-    game.message_id = sent.message_id
+    game.join_message_id = sent.message_id
+    game.phase = "joining"
     await call.message.delete()
     await call.answer()
+    asyncio.ensure_future(blackjack_join_timeout(room_id, 60))

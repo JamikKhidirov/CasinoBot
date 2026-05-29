@@ -14,6 +14,7 @@ from .base import (
     GameStates, COMMISSION_RATE, INITIAL_BLACKJACK_BALANCE, logger,
 )
 from .keyboards import blackjack_join_keyboard
+from .blackjack import blackjack_join_timeout
 
 router = Router()
 
@@ -741,14 +742,17 @@ async def process_custom_bet(message: Message, state: FSMContext):
         async with active_games_lock:
             active_blackjack_games[room_id] = game
         sent = await message.answer(
-            f"🃏 **Блэкджек**\n"
+            f"🃏 **Блэкджек стол!**\n"
             f"💵 Ставка: {bet} 🪙\n"
             f"👤 {game.player_names[message.from_user.id]} (создатель)\n"
             f"👥 Места: 1/6\n\n"
-            f"⏳ Ожидание игроков...",
+            f"⏳ Ожидание игроков...\n\n"
+            f"Нажмите «Присоединиться» или «Старт» для начала.",
             reply_markup=blackjack_join_keyboard(room_id),
         )
-        game.message_id = sent.message_id
+        game.join_message_id = sent.message_id
+        game.phase = "joining"
+        asyncio.ensure_future(blackjack_join_timeout(room_id, 60))
         return
 
     await create_game_for_user(message, message.from_user, message.from_user.id, game_type, bet)
