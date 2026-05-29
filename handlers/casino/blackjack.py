@@ -17,23 +17,53 @@ from .keyboards import blackjack_join_keyboard, blackjack_action_keyboard
 
 router = Router()
 
+CARD_SUITS = ["♠", "♥", "♦", "♣"]
+CARD_NAMES = {
+    1: "A", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6",
+    7: "7", 8: "8", 9: "9", 10: "10", 11: "J", 12: "Q", 13: "K",
+}
+CARD_VALUES = {
+    1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6,
+    7: 7, 8: 8, 9: 9, 10: 10, 11: 10, 12: 10, 13: 10,
+}
 
-def draw_card() -> int:
-    return random.randint(1, 11)
+
+def create_deck(shuffle: bool = True) -> list[dict]:
+    deck = []
+    for suit in CARD_SUITS:
+        for rank in range(1, 14):
+            deck.append({"rank": rank, "suit": suit})
+    if shuffle:
+        random.shuffle(deck)
+    return deck
 
 
-def hand_value(cards: list[int]) -> int:
-    total = sum(cards)
-    aces = cards.count(1)
+def draw_card(deck: list[dict]) -> dict:
+    return deck.pop()
+
+
+def hand_value(cards: list[dict]) -> int:
+    total = sum(CARD_VALUES[c["rank"]] for c in cards)
+    aces = sum(1 for c in cards if c["rank"] == 1)
     while total > 21 and aces > 0:
         total -= 10
         aces -= 1
     return total
 
 
-def cards_str(cards: list[int]) -> str:
-    names = {1: "A", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6", 7: "7", 8: "8", 9: "9", 10: "10", 11: "A"}
-    return " + ".join(names.get(c, str(c)) for c in cards)
+def cards_str(cards: list[dict]) -> str:
+    parts = []
+    for c in cards:
+        name = CARD_NAMES[c["rank"]]
+        suit = c["suit"]
+        parts.append(f"{name}{suit}")
+    return " ".join(parts)
+
+
+def hand_emoji(val: int) -> str:
+    if val == 21: return "🃏"
+    if val > 21: return "💥"
+    return "🎴"
 
 
 @router.message(Command("блекджек"))
@@ -191,29 +221,32 @@ async def cb_bj_start(call: CallbackQuery):
 
 
 async def start_blackjack_round(game: BlackjackRoom):
-    game.dealer_cards = [draw_card(), draw_card()]
+    game.deck = create_deck()
+    game.dealer_cards = [draw_card(game.deck), draw_card(game.deck)]
 
     for pid in game.players:
-        game.players[pid] = [draw_card(), draw_card()]
+        game.players[pid] = [draw_card(game.deck), draw_card(game.deck)]
         game.player_status[pid] = "playing"
 
-    dealer_visible = cards_str([game.dealer_cards[0]]) + " + ?"
+    dealer_visible = cards_str([game.dealer_cards[0]]) + "🂠"
     players_text = ""
     for pid, cards in game.players.items():
         name = game.player_names[pid]
         val = hand_value(cards)
-        players_text += f"{name}: {cards_str(cards)} = <b>{val}</b>\n"
+        emoji = hand_emoji(val)
+        players_text += f"{emoji} {name}: {cards_str(cards)} = <b>{val}</b>\n"
 
     text = (
         f"🃏 <b>Блэкджек начался!</b>\n"
-        f"💵 Ставка: {game.bet} монет\n\n"
+        f"💵 Ставка: {game.bet} 🪙\n\n"
         f"🎴 Дилер: {dealer_visible}\n\n"
-        f"👤 Игроки:\n{players_text}\n\n"
-        f"Первым ходит: {game.player_names[game.creator_id]}"
+        f"👤 Игроки:\n{players_text}\n"
+        f"➖➖➖➖➖➖\n"
+        f"⏳ Первым ходит: {game.player_names[game.creator_id]}"
     )
 
     try:
-        if game.join_message_id:
+        if game.join_message_id and game.chat_id:
             await get_bot().delete_message(game.chat_id, game.join_message_id)
     except Exception:
         pass
@@ -293,10 +326,10 @@ async def ask_bj_player_decision(game: BlackjackRoom, player_id: int):
 
     await get_bot().send_message(
         player_id,
-        f"🃏 <b>Ваш ход в блэкджек!</b>\n"
-        f"💵 Ставка: {game.bet}\n"
-        f"Ваши карты: {cards_str(cards)} = <b>{val}</b>\n"
-        f"Карта дилера: {cards_str([game.dealer_cards[0]])} + ?\n\n"
+        f"🃏 <b>Ваш ход!</b>\n"
+        f"💵 Ставка: {game.bet} 🪙\n"
+        f"🎴 Ваши карты: {cards_str(cards)} = <b>{val}</b>\n"
+        f"🎴 Дилер: {cards_str([game.dealer_cards[0]])} + 🂠\n\n"
         f"⏱ У вас 30 секунд!\n"
         f"👊 Ещё — взять карту\n"
         f"✋ Стоп — оставить как есть",
@@ -340,22 +373,22 @@ async def cb_bj_hit(call: CallbackQuery):
             await call.answer("❌ Вы уже остановились!", show_alert=True)
             return
 
-        card = draw_card()
+        card = draw_card(game.deck)
         game.players[player_id].append(card)
         val = hand_value(game.players[player_id])
         name = game.player_names[player_id]
         cards = game.players[player_id]
 
     await cancel_bj_timer(game)
-    await call.message.edit_text(f"🎴 {name} берёт карту: {cards_str(cards)} = <b>{val}</b>")
+    await call.message.edit_text(f"🎴 {name} берёт: {cards_str(cards)} = <b>{val}</b>")
 
     if val > 21:
         game.player_status[player_id] = "bust"
-        await get_bot().send_message(game.chat_id, f"💥 {name} перебрал ({val})! Вы проиграли.")
+        await get_bot().send_message(game.chat_id, f"💥 {name} перебрал {hand_emoji(val)} (<b>{val}</b>)")
         await next_bj_player(game, player_id)
     elif val == 21:
         game.player_status[player_id] = "stand"
-        await get_bot().send_message(game.chat_id, f"🎉 {name} набрал 21!")
+        await get_bot().send_message(game.chat_id, f"🃏 {name} набрал 21! Blackjack!")
         await next_bj_player(game, player_id)
     else:
         await ask_bj_player_decision(game, player_id)
@@ -399,13 +432,14 @@ async def play_bj_dealer(game: BlackjackRoom):
     dealer = game.dealer_cards
     dealer_val = hand_value(dealer)
     while dealer_val < 17:
-        card = draw_card()
+        card = draw_card(game.deck)
         dealer.append(card)
         dealer_val = hand_value(dealer)
 
     dealer_str = cards_str(dealer)
     result = (
-        f"🎴 <b>Дилер:</b> {dealer_str} = <b>{dealer_val}</b>\n\n"
+        f"🎴 <b>Дилер:</b> {dealer_str} = <b>{dealer_val}</b>\n"
+        f"➖➖➖➖➖➖\n"
         f"📊 <b>Результаты:</b>\n"
     )
 
@@ -413,15 +447,15 @@ async def play_bj_dealer(game: BlackjackRoom):
         name = game.player_names[pid]
         player_val = hand_value(cards)
         if player_val > 21:
-            result += f"❌ {name}: {player_val} — перебор\n"
+            result += f"❌ {name}: <b>{player_val}</b> — перебор\n"
         elif dealer_val > 21 or player_val > dealer_val:
-            result += f"🏆 {name}: {player_val} — победа! +{game.bet * 2}\n"
+            result += f"🏆 {name}: <b>{player_val}</b> — победа! +{game.bet * 2} 🪙\n"
             await update_blackjack_balance(pid, game.bet * 2, "bj_win")
         elif player_val == dealer_val:
-            result += f"🎭 {name}: {player_val} — ничья\n"
+            result += f"🎭 {name}: <b>{player_val}</b> — ничья\n"
             await update_blackjack_balance(pid, game.bet, "bj_tie")
         else:
-            result += f"❌ {name}: {player_val} — проигрыш\n"
+            result += f"❌ {name}: <b>{player_val}</b> — проигрыш\n"
 
     await get_bot().send_message(game.chat_id, result)
     game.is_finished = True

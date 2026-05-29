@@ -280,9 +280,9 @@ class BlackjackRoom:
     def __init__(self, room_id: str, bet: int, creator_id: int, chat_id: int):
         self.room_id = room_id
         self.bet = bet
-        self.players: dict[int, list[int]] = {}
+        self.players: dict[int, list[dict]] = {}
         self.player_names: dict[int, str] = {}
-        self.dealer_cards: list[int] = []
+        self.dealer_cards: list[dict] = []
         self.player_status: dict[int, str] = {}
         self.created = datetime.now()
         self.is_finished = False
@@ -295,6 +295,7 @@ class BlackjackRoom:
         self.timer_message_id: Optional[int] = None
         self.current_player: Optional[int] = None
         self.timer_seconds: int = 0
+        self.deck: Optional[list[dict]] = None
 
 
 class GameRoom:
