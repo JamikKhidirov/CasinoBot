@@ -1,4 +1,5 @@
 from aiogram import Router, F
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from handlers.user import active_users, waiting_users
 from utils.helpers import is_banned, is_admin, is_dev, can_read_chats
@@ -13,11 +14,17 @@ def _show_osint(uid: int) -> bool:
 
 
 @router.callback_query(F.data == "start_chat")
-async def cb_start_chat(call: CallbackQuery):
+async def cb_start_chat(call: CallbackQuery, state: FSMContext):
     if call.message.chat.type != "private":
         await call.answer("❌ Анонимный чат доступен только в личных сообщениях.", show_alert=True)
         return
     uid = call.from_user.id
+
+    # Clear any stale FSM state (admin/moderation/casino flows)
+    current_state = await state.get_state()
+    if current_state is not None:
+        await state.clear()
+
     if is_banned(uid):
         await call.answer("⚠️ Вы забанены.", show_alert=True)
         return
@@ -118,12 +125,36 @@ async def cb_report_chat(call: CallbackQuery):
         await call.answer("❌ Вы не в чате.", show_alert=True)
         return
     partner = active_users[uid]
+    import db
+    import datetime
+    now = datetime.datetime.now().isoformat()
+    db.cur.execute(
+        "INSERT INTO reports (reporter_id, reported_id, reason, timestamp) VALUES (?, ?, ?, ?)",
+        (uid, partner, "Жалоба из анонимного чата", now),
+    )
+    db.conn.commit()
+    # Warn the reported user
     await call.bot.send_message(
         partner,
         "⚠️ Ваш собеседник пожаловался на вас.\n"
         "Пожалуйста, соблюдайте правила общения."
     )
-    await call.answer("✅ Жалоба отправлена собеседнику.", show_alert=True)
+    # Notify the developer
+    try:
+        reporter_name = call.from_user.username or call.from_user.first_name or str(uid)
+        partner_info = await call.bot.get_chat(partner)
+        partner_name = partner_info.username or partner_info.first_name or str(partner)
+        await call.bot.send_message(
+            OWNER_ID,
+            f"⚠️ <b>Новая жалоба</b>\n\n"
+            f"┃ 👤 Пожаловался: @{reporter_name} (<code>{uid}</code>)\n"
+            f"┃ 👤 Нарушитель: @{partner_name} (<code>{partner}</code>)\n"
+            f"┃ 🕐 {now}",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+    await call.answer("✅ Жалоба отправлена разработчику.", show_alert=True)
 
 
 @router.callback_query(F.data == "back_main")
@@ -238,6 +269,7 @@ async def cb_admin_commands(call: CallbackQuery):
         parts.append("/dev_export [таблица] — экспорт")
         parts.append("/dev_log [N] — последние N строк лога")
         parts.append("/dev_sync_cmds — синхр. команды")
+        parts.append("/reports — список жалоб из анонимного чата")
 
     text = "\n".join(parts)
     if len(text) > 4000:

@@ -394,6 +394,49 @@ async def cmd_dev_export(message: Message, command: CommandObject):
     await message.answer(text, parse_mode="HTML")
 
 
+# ========== ЖАЛОБЫ ==========
+
+@router.message(Command("reports"))
+async def cmd_reports(message: Message, command: CommandObject):
+    if not is_dev(message.from_user.id):
+        return
+    import db
+    db.cur.execute(
+        "SELECT r.id, r.reporter_id, r.reported_id, r.reason, r.timestamp "
+        "FROM reports r ORDER BY r.id DESC LIMIT 30"
+    )
+    rows = db.cur.fetchall()
+    if not rows:
+        await message.answer("📋 Нет жалоб.")
+        return
+    lines = ["<b>⚠️ Список жалоб</b>\n"]
+    for row in rows:
+        rid, reporter, reported, reason, ts = row
+        r_name = f"ID{reporter}"
+        p_name = f"ID{reported}"
+        try:
+            db.cur.execute("SELECT username FROM users WHERE user_id = ?", (reporter,))
+            ru = db.cur.fetchone()
+            if ru and ru[0]: r_name = f"@{ru[0]}"
+        except:
+            pass
+        try:
+            db.cur.execute("SELECT username FROM users WHERE user_id = ?", (reported,))
+            pu = db.cur.fetchone()
+            if pu and pu[0]: p_name = f"@{pu[0]}"
+        except:
+            pass
+        lines.append(
+            f"┃ <b>#{rid}</b> | 🕐 {str(ts)[:19]}\n"
+            f"┃ 👤 {r_name} (<code>{reporter}</code>) → {p_name} (<code>{reported}</code>)\n"
+            f"┃ Причина: {reason}\n"
+        )
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3997] + "..."
+    await message.answer(text, parse_mode="HTML")
+
+
 # ========== ВОССТАНОВИТЬ КОМАНДЫ ==========
 
 @router.message(Command("dev_sync_cmds"))

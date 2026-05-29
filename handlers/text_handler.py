@@ -14,12 +14,25 @@ async def text_dispatcher(message: Message, state: FSMContext):
         return
 
     uid = message.from_user.id
-    uname = message.from_user.username
-
-    # Автообновление данных пользователя
-    update_user_activity(uid, username=uname)
 
     if message.chat.type != "private":
+        return
+
+    update_user_activity(uid, username=message.from_user.username)
+
+    # Chat messages always go through — even if FSM state is active
+    if uid in active_users:
+        if is_banned(uid):
+            await message.answer("🚫 Вы забанены и не можете отправлять сообщения.")
+            return
+        if is_muted(uid):
+            await message.answer("🔇 Вы замучены. Подождите окончания наказания.")
+            return
+        # Clear stale FSM state so admin handlers don't eat the message
+        current_state = await state.get_state()
+        if current_state is not None:
+            await state.clear()
+        await handle_chat_text(message)
         return
 
     current_state = await state.get_state()
@@ -28,16 +41,6 @@ async def text_dispatcher(message: Message, state: FSMContext):
 
     if uid in osint_waiting:
         await osint_text_handler(message)
-        return
-
-    if uid in active_users:
-        if is_banned(uid):
-            await message.answer("🚫 Вы забанены и не можете отправлять сообщения.")
-            return
-        if is_muted(uid):
-            await message.answer("🔇 Вы замучены. Подождите окончания наказания.")
-            return
-        await handle_chat_text(message)
         return
 
     await message.answer("👋 Нажмите /start для начала.")
