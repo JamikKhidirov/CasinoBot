@@ -15,6 +15,8 @@ from .base import (
 )
 from .keyboards import blackjack_join_keyboard, blackjack_action_keyboard
 
+MAX_MSG_LEN = 3997
+
 router = Router()
 
 CARD_SUITS = ["♠", "♥", "♦", "♣"]
@@ -259,7 +261,9 @@ async def start_blackjack_round(game: BlackjackRoom):
 
 async def cancel_bj_timer(game: BlackjackRoom):
     if game.timer_task and not game.timer_task.done():
-        game.timer_task.cancel()
+        current = asyncio.current_task()
+        if game.timer_task is not current:
+            game.timer_task.cancel()
         game.timer_task = None
     if game.timer_message_id:
         try:
@@ -300,6 +304,17 @@ async def bj_player_timer(game: BlackjackRoom, player_id: int, total: int = 30):
             await next_bj_player(game, player_id)
     except asyncio.CancelledError:
         pass
+    except Exception as e:
+        logger.exception(f"Ошибка в таймере блэкджека (player={player_id}): {e}")
+        try:
+            await get_bot().send_message(game.chat_id, "❌ Ошибка в таймере, игра завершена.")
+        except Exception:
+            pass
+        game.is_finished = True
+        game.phase = "finished"
+        async with active_games_lock:
+            if game.room_id in active_blackjack_games:
+                del active_blackjack_games[game.room_id]
 
 
 async def ask_bj_player_decision(game: BlackjackRoom, player_id: int):
@@ -324,17 +339,26 @@ async def ask_bj_player_decision(game: BlackjackRoom, player_id: int):
 
     game.timer_task = asyncio.ensure_future(bj_player_timer(game, player_id, 30))
 
-    await get_bot().send_message(
-        player_id,
-        f"🃏 <b>Ваш ход!</b>\n"
-        f"💵 Ставка: {game.bet} 🪙\n"
-        f"🎴 Ваши карты: {cards_str(cards)} = <b>{val}</b>\n"
-        f"🎴 Дилер: {cards_str([game.dealer_cards[0]])} + 🂠\n\n"
-        f"⏱ У вас 30 секунд!\n"
-        f"👊 Ещё — взять карту\n"
-        f"✋ Стоп — оставить как есть",
-        reply_markup=blackjack_action_keyboard(game.room_id, player_id),
-    )
+    try:
+        await get_bot().send_message(
+            player_id,
+            f"🃏 <b>Ваш ход!</b>\n"
+            f"💵 Ставка: {game.bet} 🪙\n"
+            f"🎴 Ваши карты: {cards_str(cards)} = <b>{val}</b>\n"
+            f"🎴 Дилер: {cards_str([game.dealer_cards[0]])} + 🂠\n\n"
+            f"⏱ У вас 30 секунд!\n"
+            f"👊 Ещё — взять карту\n"
+            f"✋ Стоп — оставить как есть",
+            reply_markup=blackjack_action_keyboard(game.room_id, player_id),
+        )
+    except Exception:
+        await get_bot().send_message(
+            game.chat_id,
+            f"⏭ {name} недоступен в ЛС. Авто-стоп.",
+        )
+        game.player_status[player_id] = "stand"
+        await cancel_bj_timer(game)
+        await next_bj_player(game, player_id)
 
 
 async def next_bj_player(game: BlackjackRoom, current_player_id: int):
@@ -457,6 +481,8 @@ async def play_bj_dealer(game: BlackjackRoom):
         else:
             result += f"❌ {name}: <b>{player_val}</b> — проигрыш\n"
 
+    if len(result) > MAX_MSG_LEN:
+        result = result[:MAX_MSG_LEN] + "\n\n... (обрезано)"
     await get_bot().send_message(game.chat_id, result)
     game.is_finished = True
     game.phase = "finished"
