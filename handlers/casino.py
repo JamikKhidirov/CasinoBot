@@ -15,6 +15,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config import OWNER_ID as ADMIN_ID
+from utils.helpers import is_dev, is_admin, ban_user, unban_user, mute_user, unmute_user, add_warn, is_banned, is_muted, get_warns
 
 COMMISSION_RATE = Decimal("0.1")
 DB_NAME = "casino.db"
@@ -57,6 +58,13 @@ class WithdrawState(StatesGroup):
 
 class GameStates(StatesGroup):
     waiting_for_bet = State()
+
+
+class AdminAction(StatesGroup):
+    waiting_user_id = State()
+    waiting_amount = State()
+    waiting_minutes = State()
+    waiting_reason = State()
 
 
 async def get_db() -> aiosqlite.Connection:
@@ -1554,6 +1562,13 @@ def casino_admin_kb(perms: Optional[list[str]] = None) -> InlineKeyboardMarkup:
         buttons.append([InlineKeyboardButton(text="👑 Управление админами", callback_data="casino_admin_manage")])
     if "create_promos" in perms:
         buttons.append([InlineKeyboardButton(text="🎟 Промокоды", callback_data="casino_admin_promos")])
+    # Модерация (для всех админов казино)
+    row = []
+    row.append(InlineKeyboardButton(text="🚫 Бан", callback_data="adm_ban"))
+    row.append(InlineKeyboardButton(text="🔇 Мут", callback_data="adm_mute"))
+    row.append(InlineKeyboardButton(text="⚠️ Варн", callback_data="adm_warn"))
+    row.append(InlineKeyboardButton(text="📋 Чек", callback_data="adm_check"))
+    buttons.append(row)
     buttons.append([InlineKeyboardButton(text="⭐ Соло-топ", callback_data="casino_admin_solotop")])
     buttons.append([InlineKeyboardButton(text="📖 Команды /admin", callback_data="casino_admin_help")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="casino_menu")])
@@ -1886,6 +1901,151 @@ async def cb_casino_admin_solotop(call: CallbackQuery):
     message.from_user = call.from_user
     await cmd_solo_top(message)
     await call.answer()
+
+
+# ─── Admin action buttons (ban/mute/warn/check) ──────────────────
+
+@router.callback_query(F.data == "adm_ban")
+async def cb_adm_ban(call: CallbackQuery, state: FSMContext):
+    if not await is_casino_admin(call.from_user.id):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    await state.set_state(AdminAction.waiting_reason)
+    await state.update_data(action="ban")
+    await call.message.edit_text(
+        "🚫 <b>Бан пользователя</b>\n\nВведите ID пользователя и причину:\n<code>user_id причина</code>\n\n"
+        "Или просто ID: <code>123456789</code>\n\nОтправьте /cancel для отмены.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin")]]),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "adm_mute")
+async def cb_adm_mute(call: CallbackQuery, state: FSMContext):
+    if not await is_casino_admin(call.from_user.id):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    await state.set_state(AdminAction.waiting_reason)
+    await state.update_data(action="mute")
+    await call.message.edit_text(
+        "🔇 <b>Мут пользователя</b>\n\nВведите ID пользователя и время в минутах:\n<code>user_id минуты</code>\n\n"
+        "Пример: <code>123456789 30</code>\n\nОтправьте /cancel для отмены.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin")]]),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "adm_warn")
+async def cb_adm_warn(call: CallbackQuery, state: FSMContext):
+    if not await is_casino_admin(call.from_user.id):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    await state.set_state(AdminAction.waiting_reason)
+    await state.update_data(action="warn")
+    await call.message.edit_text(
+        "⚠️ <b>Варн пользователя</b>\n\nВведите ID пользователя и причину:\n<code>user_id причина</code>\n\n"
+        "Пример: <code>123456789 Спам</code>\n\n3/3 варнов → автобан.\n\nОтправьте /cancel для отмены.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin")]]),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "adm_check")
+async def cb_adm_check(call: CallbackQuery, state: FSMContext):
+    if not await is_casino_admin(call.from_user.id):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    await state.set_state(AdminAction.waiting_user_id)
+    await state.update_data(action="check")
+    await call.message.edit_text(
+        "📋 <b>Проверка пользователя</b>\n\nВведите ID пользователя:\n<code>123456789</code>\n\nОтправьте /cancel для отмены.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin")]]),
+    )
+    await call.answer()
+
+
+# ─── Admin action text handlers ─────────────────────────────────
+
+def _parse_user_input(text: str):
+    """Парсит 'user_id причина' или просто 'user_id'"""
+    parts = text.strip().split(maxsplit=1)
+    try:
+        user_id = int(parts[0])
+        reason = parts[1] if len(parts) > 1 else ""
+        return user_id, reason
+    except (ValueError, IndexError):
+        return None, None
+
+
+@router.message(AdminAction.waiting_user_id)
+async def adm_handle_user_id(message: Message, state: FSMContext):
+    if message.text == "/cancel" or message.text.startswith("/"):
+        await state.clear()
+        await message.reply("❌ Действие отменено.")
+        return
+    data = await state.get_data()
+    action = data.get("action")
+    user_id, _ = _parse_user_input(message.text)
+    if user_id is None:
+        await message.reply("❌ Введите корректный ID пользователя (число).")
+        return
+    if action == "check":
+        from utils.helpers import get_username_safe as gus
+        name = gus(user_id)
+        banned = "✅ Да" if is_banned(user_id) else "❌ Нет"
+        muted = "✅ Да" if is_muted(user_id) else "❌ Нет"
+        warns = get_warns(user_id)
+        text = (
+            f"<b>📋 Проверка пользователя</b>\n\n"
+            f"┃ ID: <code>{user_id}</code>\n"
+            f"┃ Имя: {name}\n"
+            f"┃ Забанен: {banned}\n"
+            f"┃ Замучен: {muted}\n"
+            f"┃ Варны: {warns}/3\n"
+        )
+        await message.reply(text, parse_mode="HTML")
+        await state.clear()
+
+
+@router.message(AdminAction.waiting_reason)
+async def adm_handle_reason(message: Message, state: FSMContext):
+    if message.text == "/cancel" or message.text.startswith("/"):
+        await state.clear()
+        await message.reply("❌ Действие отменено.")
+        return
+    data = await state.get_data()
+    action = data.get("action")
+    user_id, reason = _parse_user_input(message.text)
+    if user_id is None:
+        await message.reply("❌ Введите ID пользователя (число).")
+        return
+    try:
+        if action == "ban":
+            ban_user(user_id, message.from_user.id, reason or "Не указана")
+            await message.reply(f"✅ Пользователь <code>{user_id}</code> забанен.\n┃ Причина: {reason or 'Не указана'}", parse_mode="HTML")
+        elif action == "mute":
+            minutes = 30
+            try:
+                if reason:
+                    parts = message.text.strip().split(maxsplit=2)
+                    if len(parts) >= 2:
+                        minutes = int(parts[1])
+                        reason = parts[2] if len(parts) > 2 else ""
+            except ValueError:
+                minutes = 30
+            mute_user(user_id, minutes)
+            await message.reply(f"✅ Пользователь <code>{user_id}</code> замучен на {minutes} мин.\n┃ Причина: {reason or 'Не указана'}", parse_mode="HTML")
+        elif action == "warn":
+            add_warn(user_id, message.from_user.id, reason or "Не указана")
+            warns = get_warns(user_id)
+            await message.reply(f"⚠️ Пользователю <code>{user_id}</code> выдан варн ({warns}/3).\n┃ Причина: {reason or 'Не указана'}", parse_mode="HTML")
+    except Exception as e:
+        await message.reply(f"❌ Ошибка: {e}")
+    await state.clear()
 
 
 @router.callback_query(F.data == "casino_admin_add")
