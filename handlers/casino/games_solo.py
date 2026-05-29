@@ -89,9 +89,19 @@ async def solo_game_play(message: Message, game_type: str, bet: int):
     )
 
     player_dice = await message.answer_dice(emoji=config["emoji"])
-    await asyncio.sleep(2)
+    await asyncio.sleep(4.5)
 
-    bot_dice = random.randint(1, 6)
+    await msg.edit_text(
+        f"🎲 <b>Игра с ботом</b> {config['emoji']}!\n"
+        f"💵 Ставка: {bet} монет\n\n"
+        f"{player_name}: {player_dice.dice.value}\n"
+        f"🤖 Бот бросает..."
+    )
+
+    bot_dice_msg = await message.answer_dice(emoji=config["emoji"])
+    bot_dice = bot_dice_msg.dice.value
+    await asyncio.sleep(4.5)
+
     bot_adjusted = bot_dice - 1 if game_type in ("дротики", "боулинг") else bot_dice
     player_adjusted = player_dice.dice.value - 1 if game_type in ("дротики", "боулинг") else player_dice.dice.value
 
@@ -102,6 +112,7 @@ async def solo_game_play(message: Message, game_type: str, bet: int):
         f"🤖 Бот: {bot_adjusted}"
     )
 
+    conn = None
     if player_adjusted > bot_adjusted:
         prize = bet * 2
         await update_bot_balance(message.from_user.id, prize, "solo_win")
@@ -116,13 +127,38 @@ async def solo_game_play(message: Message, game_type: str, bet: int):
             await conn.commit()
         except Exception:
             pass
-        finally:
-            await conn.close()
     elif bot_adjusted > player_adjusted:
+        await update_bot_balance(message.from_user.id, 0, "solo_lose")
         await message.answer(f"❌ <b>Бот выиграл!</b> -{bet} монет")
+        conn = await get_db()
+        try:
+            await conn.execute(
+                "INSERT INTO solo_scores (user_id, username, score, games_played) VALUES (?, ?, 0, 1) "
+                "ON CONFLICT(user_id) DO UPDATE SET games_played = games_played + 1",
+                (message.from_user.id, message.from_user.username or f"user_{message.from_user.id}"),
+            )
+            await conn.commit()
+        except Exception:
+            pass
     else:
         await update_bot_balance(message.from_user.id, bet, "solo_tie")
         await message.answer(f"🎭 <b>Ничья!</b> Ставка возвращена.")
+        conn = await get_db()
+        try:
+            await conn.execute(
+                "INSERT INTO solo_scores (user_id, username, score, games_played) VALUES (?, ?, ?, 1) "
+                "ON CONFLICT(user_id) DO UPDATE SET score = score + ?, games_played = games_played + 1",
+                (message.from_user.id, message.from_user.username or f"user_{message.from_user.id}", bet, bet),
+            )
+            await conn.commit()
+        except Exception:
+            pass
+
+    if conn:
+        try:
+            await conn.close()
+        except Exception:
+            pass
 
 
 @router.callback_query(F.data.startswith("casino_solo_pick_"))

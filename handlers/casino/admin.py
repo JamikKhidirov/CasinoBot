@@ -1,11 +1,18 @@
 from aiogram import F, Router
-from aiogram.types import CallbackQuery
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, Message
 
 from .base import (
     get_bot, get_db, get_user, create_user, update_balance, get_username,
     is_casino_admin, has_perm, get_admin_perms, ADMIN_ID, PERMISSIONS, logger,
 )
 from .keyboards import casino_admin_kb
+from utils.helpers import resolve_user, ban_user, unban_user, mute_user, unmute_user, add_warn, get_warns, is_banned, is_muted, can_moderate
+
+
+class AdminModState(StatesGroup):
+    waiting_target = State()
 
 router = Router()
 
@@ -243,6 +250,93 @@ async def cb_admin_reject_deposit(call: CallbackQuery):
         await conn.close()
     await call.answer("❌ Отклонено")
     await cb_casino_admin_pending(call)
+
+
+@router.callback_query(F.data == "adm_ban")
+async def cb_adm_ban(call: CallbackQuery, state: FSMContext):
+    if not await is_casino_admin(call.from_user.id):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    await state.set_state(AdminModState.waiting_target)
+    await state.update_data(action="ban")
+    await call.message.edit_text("🚫 Введите ID или @username пользователя для бана:")
+    await call.answer()
+
+
+@router.callback_query(F.data == "adm_mute")
+async def cb_adm_mute(call: CallbackQuery, state: FSMContext):
+    if not await is_casino_admin(call.from_user.id):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    await state.set_state(AdminModState.waiting_target)
+    await state.update_data(action="mute")
+    await call.message.edit_text("🔇 Введите ID или @username пользователя для мута:")
+    await call.answer()
+
+
+@router.callback_query(F.data == "adm_warn")
+async def cb_adm_warn(call: CallbackQuery, state: FSMContext):
+    if not await is_casino_admin(call.from_user.id):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    await state.set_state(AdminModState.waiting_target)
+    await state.update_data(action="warn")
+    await call.message.edit_text("⚠️ Введите ID или @username пользователя для варна:")
+    await call.answer()
+
+
+@router.callback_query(F.data == "adm_check")
+async def cb_adm_check(call: CallbackQuery, state: FSMContext):
+    if not await is_casino_admin(call.from_user.id):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    await state.set_state(AdminModState.waiting_target)
+    await state.update_data(action="check")
+    await call.message.edit_text("📋 Введите ID или @username пользователя для проверки:")
+    await call.answer()
+
+
+@router.message(AdminModState.waiting_target)
+async def process_admin_target(message: Message, state: FSMContext):
+    data = await state.get_data()
+    action = data.get("action")
+
+    target_id = resolve_user(message.text)
+    if target_id is None:
+        await message.answer("❌ Пользователь не найден. Укажите числовой ID или @username.")
+        return
+
+    if not can_moderate(message.from_user.id, target_id):
+        await message.answer("❌ Нельзя модерировать этого пользователя.")
+        return
+
+    mod_id = message.from_user.id
+
+    if action == "ban":
+        ban_user(target_id, mod_id, "Бан из админ-панели казино")
+        await message.answer(f"✅ Пользователь <code>{target_id}</code> забанен.")
+
+    elif action == "mute":
+        mute_user(target_id, mod_id, 60)
+        await message.answer(f"✅ Пользователь <code>{target_id}</code> замучен на 60 мин.")
+
+    elif action == "warn":
+        warns = add_warn(target_id, mod_id)
+        await message.answer(f"⚠️ Пользователь <code>{target_id}</code> получил варн ({warns}/3).")
+
+    elif action == "check":
+        banned = is_banned(target_id)
+        muted = is_muted(target_id)
+        warns = get_warns(target_id)
+        lines = [
+            f"📋 <b>Проверка пользователя</b> <code>{target_id}</code>",
+            f"┃ 🚫 Бан: {'✅ Да' if banned else '❌ Нет'}",
+            f"┃ 🔇 Мут: {'✅ Да' if muted else '❌ Нет'}",
+            f"┃ ⚠️ Варны: {warns}/3",
+        ]
+        await message.answer("\n".join(lines), parse_mode="HTML")
+
+    await state.clear()
 
 
 @router.callback_query(F.data == "casino_admin_solotop")

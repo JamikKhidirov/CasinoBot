@@ -52,14 +52,26 @@ async def cb_casino_profile(call: CallbackQuery):
 
     bj_bal = user["blackjack_balance"] if user["blackjack_balance"] else 1000
     bbot = user["bot_balance"] if user["bot_balance"] else 500
+    conn = await get_db()
+    solo_row = None
+    try:
+        cur = await conn.execute("SELECT score, games_played FROM solo_scores WHERE user_id = ?", (call.from_user.id,))
+        solo_row = await cur.fetchone()
+    except Exception:
+        pass
+    finally:
+        await conn.close()
+    solo_score = solo_row["score"] if solo_row else 0
+    solo_games = solo_row["games_played"] if solo_row else 0
     text = (
         f"<b>📊 Профиль игрока</b> {call.from_user.first_name}\n\n"
         f"┃ 🆔 ID: <code>{user['user_id']}</code>\n"
         f"┃ 💰 <b>PVP баланс:</b> {user['balance']} 🪙\n"
         f"┃ 🤖 <b>С ботом:</b> {bbot} 🤖\n"
         f"┃ 🃏 <b>Блэкджек:</b> {bj_bal} 🪙\n"
-        f"┃ 🎮 <b>Сыграно игр:</b> {user['games_played']}\n"
-        f"┃ 🏆 <b>Побед:</b> {user['wins']}\n"
+        f"┃ ⭐ <b>Соло очки:</b> {solo_score} ({solo_games} игр)\n"
+        f"┃ 🎮 <b>Сыграно PVP игр:</b> {user['games_played']}\n"
+        f"┃ 🏆 <b>Побед PVP:</b> {user['wins']}\n"
     )
     markup = _inline_keyboard([
         [("💳 Пополнить PVP", "deposit"), ("💸 Вывести", "withdraw")],
@@ -71,6 +83,24 @@ async def cb_casino_profile(call: CallbackQuery):
 
 @router.callback_query(F.data == "casino_top")
 async def cb_casino_top(call: CallbackQuery):
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏆 Топ казино (PVP)", callback_data="casino_top_pvp")],
+        [InlineKeyboardButton(text="⭐ Топ соло", callback_data="casino_top_solo")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="casino_menu")],
+    ])
+    await call.message.edit_text(
+        "<b>🏆 Выберите топ:</b>\n\n"
+        "🏆 <b>Топ казино</b> — игроки с самым большим PVP-балансом\n"
+        "⭐ <b>Топ соло</b> — игроки с наибольшими очками в соло-играх",
+        parse_mode="HTML",
+        reply_markup=markup,
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "casino_top_pvp")
+async def cb_casino_top_pvp(call: CallbackQuery):
     conn = await get_db()
     try:
         cursor = await conn.execute(
@@ -83,12 +113,36 @@ async def cb_casino_top(call: CallbackQuery):
     if not rows:
         await call.message.answer("❌ Пока нет данных о пользователях.")
     else:
-        text = "<b>🏆 Топ 10 игроков</b>\n\n"
+        text = "<b>🏆 Топ 10 казино (PVP)</b>\n\n"
         for i, row in enumerate(rows, 1):
             name = row["username"] or f"user_{row['user_id']}"
             medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "▫️"
             text += f"{medal} <b>{i}.</b> @{name}  →  {row['balance']} 🪙\n"
         await call.message.answer(text, parse_mode="HTML")
+    await call.answer()
+
+
+@router.callback_query(F.data == "casino_top_solo")
+async def cb_casino_top_solo(call: CallbackQuery):
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT user_id, username, score, games_played FROM solo_scores ORDER BY score DESC LIMIT 10"
+        )
+        rows = await cursor.fetchall()
+    finally:
+        await conn.close()
+    if not rows:
+        await call.message.answer("❌ Пока никто не играл в соло-казино.")
+        await call.answer()
+        return
+    text = "<b>⭐ Топ 10 соло-казино</b>\n\n"
+    for i, row in enumerate(rows, 1):
+        name = row["username"] or f"user_{row['user_id']}"
+        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "▫️"
+        avg = round(row["score"] / row["games_played"], 1) if row["games_played"] else 0
+        text += f"{medal} <b>{i}.</b> {name}  →  {row['score']} ⭐  ({row['games_played']} игр, ср. {avg})\n"
+    await call.message.answer(text, parse_mode="HTML")
     await call.answer()
 
 
