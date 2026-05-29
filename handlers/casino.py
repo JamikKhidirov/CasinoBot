@@ -131,6 +131,12 @@ async def init_db():
                 activated_at TEXT,
                 FOREIGN KEY (code) REFERENCES promocodes(code)
             );
+            CREATE TABLE IF NOT EXISTS solo_scores (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                score INTEGER DEFAULT 0,
+                games_played INTEGER DEFAULT 0
+            );
         """)
         await conn.commit()
     finally:
@@ -902,7 +908,15 @@ async def cmd_admin_add_balance(message: Message):
     await update_balance(user_id, amount, "admin_add")
     await clean_reply(message, f"✅ Баланс пользователя <code>{user_id}</code> пополнен на <b>{amount}</b> монет!")
     try:
-        await get_bot().send_message(user_id, f"Администратор пополнил ваш баланс на {amount} монет! 🎉")
+        admin_name = message.from_user.username or f"Администратор"
+        await get_bot().send_message(
+            user_id,
+            f"<b>💰 Баланс пополнен!</b>\n\n"
+            f"┃ Сумма: +{amount} 🪙\n"
+            f"┃ Пополнил: @{admin_name}\n\n"
+            f"🎉 Приятной игры!",
+            parse_mode="HTML",
+        )
     except Exception:
         pass
 
@@ -1540,6 +1554,7 @@ def casino_admin_kb(perms: Optional[list[str]] = None) -> InlineKeyboardMarkup:
         buttons.append([InlineKeyboardButton(text="👑 Управление админами", callback_data="casino_admin_manage")])
     if "create_promos" in perms:
         buttons.append([InlineKeyboardButton(text="🎟 Промокоды", callback_data="casino_admin_promos")])
+    buttons.append([InlineKeyboardButton(text="⭐ Соло-топ", callback_data="casino_admin_solotop")])
     buttons.append([InlineKeyboardButton(text="📖 Команды /admin", callback_data="casino_admin_help")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="casino_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -1860,6 +1875,19 @@ async def cb_promo_list(call: CallbackQuery):
     await call.answer()
 
 
+@router.callback_query(F.data == "casino_admin_solotop")
+async def cb_casino_admin_solotop(call: CallbackQuery):
+    uid = call.from_user.id
+    if not await is_casino_admin(uid):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    # reuse solo top logic
+    message = call.message
+    message.from_user = call.from_user
+    await cmd_solo_top(message)
+    await call.answer()
+
+
 @router.callback_query(F.data == "casino_admin_add")
 async def cb_casino_admin_add(call: CallbackQuery):
     uid = call.from_user.id
@@ -1959,6 +1987,8 @@ ADMIN_COMMANDS = {
     "/createpromo <код> <сумма>": "🎟 Создать промокод (право: create_promos)",
     "/deletepromo <код>": "🎟 Удалить промокод (право: create_promos)",
     "/promo_list": "🎟 Список всех промокодов (право: create_promos)",
+    "/solo": "🎮 Соло-казино (только в группах)",
+    "/solotop": "⭐ Топ соло-казино",
 }
 
 
@@ -2480,6 +2510,114 @@ async def cb_casino_bet_select(call: CallbackQuery, state: FSMContext):
     await create_game_for_user(call.message, call.from_user, call.from_user.id, game_type, bet, edit_target=call.message)
 
 
+# ─── Solo casino (single-player, group only) ────────────────────
+
+SOLO_POINTS = {
+    "🎲": lambda v: v,
+    "🎳": lambda v: v - 1,
+    "🎯": lambda v: v - 1,
+    "🏀": lambda v: 3 if v > 2 else 0,
+    "⚽": lambda v: 3 if v > 2 else 0,
+}
+
+def solo_kb() -> InlineKeyboardMarkup:
+    buttons = []
+    row = []
+    for gt, cfg in GAMES_CONFIG.items():
+        row.append(InlineKeyboardButton(text=f"{cfg['emoji']} {gt.capitalize()}", callback_data=f"solo_{gt}"))
+    buttons.append(row)
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+@router.message(Command("solo"))
+async def cmd_solo(message: Message):
+    if message.chat.type == "private":
+        await message.reply("❌ Соло-казино доступно только в группах!")
+        return
+    user = await get_user(message.from_user.id)
+    if not user:
+        await message.reply("❌ Сначала зарегистрируйтесь — отправьте /start в личные сообщения бота!")
+        return
+    text = "<b>🎮 Соло-казино</b>\n\nВыберите игру:\n┃ Очки идут в отдельный топ"
+    await message.reply(text, reply_markup=solo_kb(), parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("solo_"))
+async def cb_solo_game(call: CallbackQuery):
+    game_type = call.data[5:]
+    if game_type not in GAMES_CONFIG:
+        await call.answer("❌ Неизвестная игра!", show_alert=True)
+        return
+    uid = call.from_user.id
+    user = await get_user(uid)
+    if not user:
+        await call.answer("❌ Сначала /start в личные сообщения!", show_alert=True)
+        return
+    config = GAMES_CONFIG[game_type]
+    player_name = await get_username(uid)
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
+    roll_msg = await get_bot().send_message(call.message.chat.id, f"{player_name} {config['action']} соло...")
+    dice_msg = await get_bot().send_dice(call.message.chat.id, emoji=config["emoji"], disable_notification=True)
+    await asyncio.sleep(4)
+    await roll_msg.delete()
+    dice_val = dice_msg.dice.value
+    points = SOLO_POINTS[config["emoji"]](dice_val)
+    score_text = f"{dice_val}"
+    if game_type in ("дротики", "боулинг"):
+        score_text = f"{dice_val} → {points}"
+    elif game_type in ("футбол", "баскетбол"):
+        score_text = f"{'✅ Гол!' if points > 0 else '❌ Промах!'}"
+
+    conn = await get_db()
+    try:
+        await conn.execute(
+            "INSERT INTO solo_scores (user_id, username, score, games_played) VALUES (?, ?, ?, 1) "
+            "ON CONFLICT(user_id) DO UPDATE SET score = score + ?, games_played = games_played + 1, username = ?",
+            (uid, player_name, points, points, player_name),
+        )
+        await conn.commit()
+    finally:
+        await conn.close()
+
+    result_msg = await get_bot().send_message(
+        call.message.chat.id,
+        f"{player_name}: {score_text} {config['emoji']}  +{points} ⭐",
+    )
+
+    await call.answer()
+    await asyncio.sleep(10)
+    try:
+        await result_msg.delete()
+        await dice_msg.delete()
+    except Exception:
+        pass
+
+
+@router.message(Command("solotop"))
+async def cmd_solo_top(message: Message):
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT user_id, username, score, games_played FROM solo_scores ORDER BY score DESC LIMIT 10"
+        )
+        rows = await cursor.fetchall()
+    finally:
+        await conn.close()
+    if not rows:
+        await message.answer("❌ Пока никто не играл в соло-казино.")
+        return
+    text = "<b>⭐ Топ 10 соло-казино</b>\n\n"
+    for i, row in enumerate(rows, 1):
+        name = row["username"] or f"user_{row['user_id']}"
+        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "▫️"
+        avg = round(row["score"] / row["games_played"], 1) if row["games_played"] else 0
+        text += f"{medal} <b>{i}.</b> {name}  →  {row['score']} ⭐  ({row['games_played']} игр, ср. {avg})\n"
+    await message.answer(text, parse_mode="HTML")
+
+
 @router.message(GameStates.waiting_for_bet)
 async def process_custom_bet(message: Message, state: FSMContext):
     text = message.text.strip()
@@ -2985,9 +3123,15 @@ async def determine_winner(game: GameRoom):
         logger.info(f"Игра завершена: room_id={game.room_id}, winner={winner}")
 
     except Exception as e:
-        logger.error(f"Ошибка в determine_winner: {e}")
+        logger.error(f"Ошибка в determine_winner: {e}", exc_info=True)
         try:
-            await get_bot().send_message(game.chat_id, "❌ Произошла ошибка при завершении игры!")
+            err_text = "❌ Произошла ошибка при завершении игры!\n"
+            user1_ok = await get_user(game.player1) is not None
+            user2_ok = await get_user(game.player2) is not None if game.player2 else True
+            if not user1_ok or not user2_ok:
+                err_text += "┃ Возможно, один из игроков не зарегистрирован.\n"
+                err_text += "┃ Отправьте /start в личные сообщения бота."
+            await get_bot().send_message(game.chat_id, err_text)
         except Exception:
             pass
         async with active_games_lock:
