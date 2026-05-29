@@ -23,11 +23,12 @@ BOT_TOKEN = "7042929053:AAEsz4mIBA6P2ZKoPRiMuad1UIdR8dS9TQE"
 ADMIN_ID = 1819756249
 COMMISSION_RATE = Decimal("0.1")
 DB_NAME = "casino.db"
-PROXY_URL = None  # Например "http://proxy:8080" или "socks5://proxy:1080"
+PROXY_URL = None
 INITIAL_BALANCE = 1000
 INITIAL_BOT_BALANCE = 500
 DAILY_BONUS = 500
 DAILY_BOT_BONUS = 200
+INITIAL_BLACKJACK_BALANCE = 1000
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,9 +49,15 @@ GAMES_CONFIG = {
     "футбол": {"command": "футбол", "emoji": "⚽", "timeout": 30},
 }
 
+GAME_LIST_STRING = ", ".join(f"/{v['command']}" for v in GAMES_CONFIG.values())
+
 
 class DepositState(StatesGroup):
     waiting_for_amount = State()
+
+
+class MuteState(StatesGroup):
+    waiting_for_details = State()
 
 
 async def get_db() -> aiosqlite.Connection:
@@ -68,6 +75,7 @@ async def init_db():
                 username TEXT,
                 balance INTEGER DEFAULT 1000,
                 bot_balance INTEGER DEFAULT 500,
+                blackjack_balance INTEGER DEFAULT 1000,
                 games_played INTEGER DEFAULT 0,
                 wins INTEGER DEFAULT 0,
                 last_bonus DATE,
@@ -123,8 +131,8 @@ async def create_user(tg_user) -> None:
     conn = await get_db()
     try:
         await conn.execute(
-            "INSERT OR IGNORE INTO users (user_id, username, balance, bot_balance) VALUES (?, ?, ?, ?)",
-            (tg_user.id, username, INITIAL_BALANCE, INITIAL_BOT_BALANCE),
+            "INSERT OR IGNORE INTO users (user_id, username, balance, bot_balance, blackjack_balance) VALUES (?, ?, ?, ?, ?)",
+            (tg_user.id, username, INITIAL_BALANCE, INITIAL_BOT_BALANCE, INITIAL_BLACKJACK_BALANCE),
         )
         await conn.commit()
     finally:
@@ -172,6 +180,23 @@ async def update_bot_balance(user_id: int, amount: int, tr_type: str) -> None:
         await conn.close()
 
 
+async def update_blackjack_balance(user_id: int, amount: int, tr_type: str) -> None:
+    conn = await get_db()
+    try:
+        timestamp = datetime.now().isoformat()
+        await conn.execute(
+            "UPDATE users SET blackjack_balance = blackjack_balance + ? WHERE user_id = ?",
+            (amount, user_id),
+        )
+        await conn.execute(
+            "INSERT INTO transactions (user_id, amount, type, timestamp) VALUES (?, ?, ?, ?)",
+            (user_id, amount, tr_type, timestamp),
+        )
+        await conn.commit()
+    finally:
+        await conn.close()
+
+
 async def is_user_muted(user_id: int) -> bool:
     conn = await get_db()
     try:
@@ -205,7 +230,7 @@ async def get_all_users_list() -> list[dict]:
     conn = await get_db()
     try:
         cursor = await conn.execute(
-            "SELECT user_id, username, balance, bot_balance, is_muted FROM users ORDER BY user_id"
+            "SELECT user_id, username, balance, bot_balance, blackjack_balance, is_muted FROM users ORDER BY user_id"
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
@@ -217,7 +242,7 @@ async def find_user_by_username(username: str) -> Optional[dict]:
     conn = await get_db()
     try:
         cursor = await conn.execute(
-            "SELECT user_id, username, balance, bot_balance, is_muted FROM users WHERE username = ?",
+            "SELECT user_id, username, balance, bot_balance, blackjack_balance, is_muted FROM users WHERE username = ?",
             (username.lstrip("@"),),
         )
         row = await cursor.fetchone()
@@ -265,7 +290,25 @@ class GameRoom:
         return False
 
 
+class BlackjackRoom:
+    def __init__(self, room_id: str, bet: int, creator_id: int, chat_id: int):
+        self.room_id = room_id
+        self.bet = bet
+        self.players: dict[int, list[int]] = {}
+        self.player_names: dict[int, str] = {}
+        self.dealer_cards: list[int] = []
+        self.player_status: dict[int, str] = {}
+        self.created = datetime.now()
+        self.is_finished = False
+        self.chat_id = chat_id
+        self.message_id: Optional[int] = None
+        self.creator_id = creator_id
+        self.join_message_id: Optional[int] = None
+        self.phase = "joining"
+
+
 active_games: dict[str, GameRoom] = {}
+active_blackjack_games: dict[str, BlackjackRoom] = {}
 active_games_lock = asyncio.Lock()
 
 
@@ -285,6 +328,26 @@ def roll_keyboard(room_id: str, player_id: int, emoji: str) -> InlineKeyboardMar
     )
 
 
+def blackjack_join_keyboard(room_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🃏 Присоединиться к блэкджеку", callback_data=f"bj_join_{room_id}")],
+            [InlineKeyboardButton(text="▶️ Старт", callback_data=f"bj_start_{room_id}")],
+        ]
+    )
+
+
+def blackjack_action_keyboard(room_id: str, player_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="👊 Ещё", callback_data=f"bj_hit_{room_id}_{player_id}"),
+                InlineKeyboardButton(text="✋ Стоп", callback_data=f"bj_stand_{room_id}_{player_id}"),
+            ]
+        ]
+    )
+
+
 # ─── Handlers ─────────────────────────────────────────────────────────────────
 
 
@@ -294,7 +357,7 @@ async def cmd_start(message: Message):
     text = (
         f"🎰 Добро пожаловать в Casino Bot, {message.from_user.first_name}!\n\n"
         "🕹 Доступные команды:\n"
-        "/профиль — Ваш игровой профиль (баланс PVP + бот-монеты)\n"
+        "/профиль — Ваш игровой профиль\n"
         "/топ — Топ игроков\n"
         "/бонус — Ежедневный бонус (PVP)\n"
         "/ботбонус — Ежедневный бонус (бот-монеты)\n"
@@ -303,9 +366,10 @@ async def cmd_start(message: Message):
         "/разблокировать — Отменить все свои игры и получить возврат\n"
         "\n🎮 Режимы игры:\n"
         "🤖 `/сботом [игра] [ставка]` — Игра с ботом (в ЛС, бот-монеты)\n"
-        "👥 `/игры` → \"С игроками\" — PVP (только в группе)\n"
-        "\n🕹 Игры: куб 🎲, боулинг 🎳, дротики 🎯, баскетбол 🏀, футбол ⚽"
-    )
+        "👥 PVP `/куб 100` — Игра с игроками (только в группе)\n"
+        "🃏 `/блекджек [ставка]` — Блэкджек (в группе, до 6 игроков)\n"
+        "\n🕹 Игры: {game_list}"
+    ).format(game_list=GAME_LIST_STRING)
     markup = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🎮 Выбрать режим игры", callback_data="games_menu")],
@@ -322,15 +386,12 @@ async def cmd_profile(message: Message):
         await message.answer("❌ Пользователь не найден! Напишите /start")
         return
 
-    if message.chat.type != "private":
-        await message.reply("ℹ️ Для просмотра профиля и пополнения баланса перейдите в личные сообщения с ботом.")
-        return
-
     text = (
         f"📊 Профиль игрока {message.from_user.first_name}\n\n"
         f"🆔 ID: {user['user_id']}\n"
         f"💰 Баланс (PVP): {user['balance']} монет\n"
         f"🤖 Баланс (бот): {user['bot_balance']} бот-монет\n"
+        f"🃏 Баланс (блэкджек): {user['blackjack_balance']} монет\n"
         f"🎮 Сыграно игр: {user['games_played']}\n"
         f"🏆 Побед: {user['wins']}\n"
         f"📅 Последний бонус: {user['last_bonus'] or 'ещё не получал'}"
@@ -548,15 +609,15 @@ async def cmd_games(message: Message):
         inline_keyboard=[
             [InlineKeyboardButton(text="🤖 Играть с ботом (в ЛС)", callback_data="play_bot_menu")],
             [InlineKeyboardButton(text="👥 Играть с игроками (в группе)", callback_data="play_pvp_menu")],
+            [InlineKeyboardButton(text="🃏 Блэкджек (в группе)", callback_data="play_blackjack_info")],
             [InlineKeyboardButton(text="📊 Профиль", callback_data="myprofile")],
         ]
     )
     await message.answer(
         "🎮 **Выберите режим игры:**\n\n"
-        "🤖 **С ботом** — играйте один на один с ботом в личных сообщениях\n"
-        "   *Отдельная валюта (бот-монеты), ежедневный бонус*\n\n"
-        "👥 **С игроками** — соревнуйтесь с другими игроками\n"
-        "   *Только в групповых чатах. Добавьте бота в группу!*",
+        "🤖 **С ботом** — играйте один на один с ботом в ЛС (бот-монеты)\n"
+        "👥 **С игроками** — PVP в группе (куб, боулинг, дротики, баскетбол, футбол)\n"
+        "🃏 **Блэкджек** — игра против дилера в группе (до 6 игроков)",
         reply_markup=markup,
     )
 
@@ -567,15 +628,15 @@ async def cb_games_menu(call: CallbackQuery):
         inline_keyboard=[
             [InlineKeyboardButton(text="🤖 Играть с ботом (в ЛС)", callback_data="play_bot_menu")],
             [InlineKeyboardButton(text="👥 Играть с игроками (в группе)", callback_data="play_pvp_menu")],
+            [InlineKeyboardButton(text="🃏 Блэкджек (в группе)", callback_data="play_blackjack_info")],
             [InlineKeyboardButton(text="📊 Профиль", callback_data="myprofile")],
         ]
     )
     await call.message.edit_text(
         "🎮 **Выберите режим игры:**\n\n"
-        "🤖 **С ботом** — играйте один на один с ботом в личных сообщениях\n"
-        "   *Отдельная валюта (бот-монеты), ежедневный бонус*\n\n"
-        "👥 **С игроками** — соревнуйтесь с другими игроками\n"
-        "   *Только в групповых чатах. Добавьте бота в группу!*",
+        "🤖 **С ботом** — играйте один на один с ботом в ЛС (бот-монеты)\n"
+        "👥 **С игроками** — PVP в группе (куб, боулинг, дротики, баскетбол, футбол)\n"
+        "🃏 **Блэкджек** — игра против дилера в группе (до 6 игроков)",
         reply_markup=markup,
     )
     await call.answer()
@@ -584,9 +645,9 @@ async def cb_games_menu(call: CallbackQuery):
 @router.callback_query(F.data == "play_bot_menu")
 async def cb_play_bot_menu(call: CallbackQuery):
     if call.message.chat.type != "private":
-        await call.answer("🤖 Играть с ботом можно только в ЛС!", show_alert=True)
+        await call.answer("🤖 Играть с ботом можно только в ЛС! Напишите боту в личку.", show_alert=True)
         return
-    text = "🤖 **Игра с ботом**\n\nВыберите игру и укажите ставку:\n\n"
+    text = "🤖 **Игра с ботом**\n\nФормат: `/сботом [игра] [ставка]`\n\n"
     for game_type, cfg in GAMES_CONFIG.items():
         text += f"/сботом {cfg['command']} [ставка] — {game_type} {cfg['emoji']}\n"
     text += "\nПример: `/сботом куб 50`"
@@ -610,7 +671,6 @@ async def cb_play_pvp_menu(call: CallbackQuery):
         ).format(bot_username)
         markup = InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="📋 Копировать username", callback_data=f"copy_{bot_username}")],
                 [InlineKeyboardButton(text="◀️ Назад", callback_data="games_menu")],
             ]
         )
@@ -618,10 +678,33 @@ async def cb_play_pvp_menu(call: CallbackQuery):
         await call.answer("Добавьте бота в группу!", show_alert=False)
         return
 
-    text = "👥 **Игра с игроками**\n\nВыберите игру и укажите ставку:\n\n"
+    text = "👥 **Игра с игроками**\n\nФормат: `/команда [ставка]`\n\n"
     for game_type, cfg in GAMES_CONFIG.items():
         text += f"/{cfg['command']} [ставка] — {game_type} {cfg['emoji']}\n"
     text += "\nПример: `/куб 100`"
+    await call.message.edit_text(text)
+    await call.answer()
+
+
+@router.callback_query(F.data == "play_blackjack_info")
+async def cb_play_blackjack_info(call: CallbackQuery):
+    if call.message.chat.type == "private":
+        await call.answer("🃏 Блэкджек доступен только в группах!", show_alert=True)
+        return
+    text = (
+        "🃏 **Блэкджек**\n\n"
+        "Правила:\n"
+        "• Каждый игрок получает 2 карты, дилер — 2 (1 открыта)\n"
+        "• Нужно набрать сумму очков как можно ближе к 21\n"
+        "• Можно брать ещё карты (Hit) или остановиться (Stand)\n"
+        "• Дилер обязан брать карты до 17+\n"
+        "• Кто перебрал (>21) — проиграл\n\n"
+        "Как играть:\n"
+        "/блекджек [ставка] — создать стол в группе\n"
+        "Игроки нажимают «Присоединиться»\n"
+        "Создатель нажимает «Старт» для начала\n"
+        "До 6 игроков за одним столом"
+    )
     await call.message.edit_text(text)
     await call.answer()
 
@@ -637,6 +720,7 @@ async def cb_myprofile(call: CallbackQuery):
         f"🆔 ID: {user['user_id']}\n"
         f"💰 Баланс (PVP): {user['balance']} монет\n"
         f"🤖 Баланс (бот): {user['bot_balance']} бот-монет\n"
+        f"🃏 Баланс (блэкджек): {user['blackjack_balance']} монет\n"
         f"🎮 Сыграно игр: {user['games_played']}\n"
         f"🏆 Побед: {user['wins']}\n"
         f"📅 Последний бонус: {user['last_bonus'] or 'ещё не получал'}"
@@ -657,7 +741,7 @@ async def cb_myprofile(call: CallbackQuery):
 @router.message(Command("активные"))
 async def cmd_active_games(message: Message):
     async with active_games_lock:
-        if not active_games:
+        if not active_games and not active_blackjack_games:
             await message.reply("Сейчас нет активных игр.")
             return
 
@@ -673,6 +757,16 @@ async def cmd_active_games(message: Message):
                 f"Игрок 1: {p1}\n"
                 f"Игрок 2: {p2}\n"
                 f"ID: {g.room_id}\n\n"
+            )
+        for bj in active_blackjack_games.values():
+            if bj.is_finished:
+                continue
+            players_str = ", ".join(await asyncio.gather(*[get_username(pid) for pid in bj.players]))
+            text += (
+                f"🃏 Блэкджек\n"
+                f"💵 Ставка: {bj.bet} монет\n"
+                f"Игроки: {players_str}\n"
+                f"ID: {bj.room_id}\n\n"
             )
     await message.reply(text)
 
@@ -728,8 +822,8 @@ async def cmd_all_players(message: Message):
         name = f"@{p['username']}" if p["username"] else f"ID_{p['user_id']}"
         chunk.append(
             f"👤 ID: {p['user_id']} | {name}\n"
-            f"💰 {p['balance']} | 🎮 {p['games_played']} | 🏆 {p['wins']}\n"
-            f"📅 Бонус: {p['last_bonus'] or 'нет'}\n"
+            f"💰 {p['balance']} | 🤖 {p['bot_balance']} | 🃏 {p['blackjack_balance']}\n"
+            f"🎮 {p['games_played']} | 🏆 {p['wins']}\n"
             f"{'─' * 20}"
         )
         if len(chunk) == 10:
@@ -768,7 +862,6 @@ async def determine_bot_winner(game: GameRoom):
         p1_score = game.results.get(game.player1, 0)
         bot_score = game.results.get(0, 0)
 
-        total_bet = game.bet * 2
         result_msg = ""
         winner = None
 
@@ -827,7 +920,7 @@ async def determine_bot_winner(game: GameRoom):
 @router.message(Command("сботом"))
 async def cmd_play_with_bot(message: Message):
     if message.chat.type != "private":
-        await message.reply("❌ Игра с ботом доступна только в личных сообщениях!\nНапишите /start в ЛС.")
+        await message.reply("❌ Игра с ботом доступна только в личных сообщениях!\nНапишите /start в ЛС бота.")
         return
 
     if await is_user_muted(message.from_user.id):
@@ -835,8 +928,18 @@ async def cmd_play_with_bot(message: Message):
         return
 
     parts = message.text.split(maxsplit=2)
+    if len(parts) < 2:
+        games_list = "\n".join(f"  /сботом {v['command']} [ставка]" for v in GAMES_CONFIG.values())
+        await message.reply(
+            "🤖 **Игра с ботом**\n\n"
+            "Формат: `/сботом [игра] [ставка]`\n\n"
+            f"Доступные игры:\n{games_list}\n\n"
+            f"Пример: `/сботом куб 50`\n"
+            f"Баланс: /ботбонус (получить бонус)"
+        )
+        return
     if len(parts) < 3:
-        await message.reply("❌ Формат: `/сботом [игра] [ставка]`\nПример: `/сботом куб 50`")
+        await message.reply("❌ Укажите ставку!\nПример: `/сботом {} 50`".format(parts[1]))
         return
 
     game_name = parts[1].lower()
@@ -874,7 +977,6 @@ async def cmd_play_with_bot(message: Message):
     async with active_games_lock:
         active_games[room_id] = game
 
-    player_name = await get_username(message.from_user.id)
     msg = await message.answer(
         f"🤖 **Игра с ботом в {config['emoji']}!**\n"
         f"💵 Ставка: {bet} бот-монет\n\n"
@@ -887,7 +989,6 @@ async def cmd_play_with_bot(message: Message):
     logging.info(f"Создана игра с ботом: room_id={room_id}, game_type={game_name}, player1={message.from_user.id}")
 
 
-# Override roll handler for bot games
 @router.callback_query(F.data.startswith("roll_"))
 async def cb_roll_dice(call: CallbackQuery):
     try:
@@ -1059,8 +1160,10 @@ async def cmd_bot_daily_bonus(message: Message):
     finally:
         await conn.close()
 
+    user = await get_user(user_id)
+    new_bal = user["bot_balance"] if user else DAILY_BOT_BONUS
     await message.reply(f"🎉 Вы получили ежедневный бонус: {DAILY_BOT_BONUS} бот-монет!\n"
-                        f"Теперь у вас {user['bot_balance'] + DAILY_BOT_BONUS} бот-монет.")
+                        f"Теперь у вас {new_bal} бот-монет.")
 
 
 # ─── Admin: Mute/Unute by Username ────────────────────────────────────────────
@@ -1139,8 +1242,11 @@ async def cb_admin_unmute_list(call: CallbackQuery):
     await call.answer()
 
 
+mute_user_targets: dict[int, int] = {}
+
+
 @router.callback_query(F.data.startswith("mute_user_"))
-async def cb_mute_user_select(call: CallbackQuery):
+async def cb_mute_user_select(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID:
         await call.answer("❌ Доступ запрещён!", show_alert=True)
         return
@@ -1151,15 +1257,104 @@ async def cb_mute_user_select(call: CallbackQuery):
         return
 
     name = f"@{user['username']}" if user['username'] else f"ID {user['user_id']}"
+    mute_user_targets[call.from_user.id] = user_id
     text = (
         f"🔇 **Мут пользователя {name}**\n\n"
-        f"Напишите причину и длительность мута одним сообщением.\n\n"
-        f"Формат: `причина | длительность`\n"
+        f"Напишите одним сообщением: `длительность причина`\n\n"
         f"Длительность: `forever`, `1d`, `2h`, `30m`\n\n"
-        f"Пример: `Спам | 1d`"
+        f"Пример: `1d Спам в чате`"
     )
     await call.message.edit_text(text)
+    await state.set_state(MuteState.waiting_for_details)
     await call.answer()
+
+
+@router.message(MuteState.waiting_for_details)
+async def process_mute_details(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await state.clear()
+        return
+    target_id = mute_user_targets.pop(message.from_user.id, None)
+    if not target_id:
+        await message.reply("❌ Сессия мута истекла. Начните заново.")
+        await state.clear()
+        return
+
+    user = await get_user(target_id)
+    if not user:
+        await message.reply("❌ Пользователь не найден!")
+        await state.clear()
+        return
+
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 1:
+        await message.reply("❌ Укажите длительность! Пример: `1d Спам`")
+        return
+
+    duration_str = parts[0].lower()
+    reason = parts[1] if len(parts) > 1 else "Без причины"
+
+    try:
+        if duration_str == "forever":
+            muted_until = None
+        elif duration_str.endswith("d"):
+            days = int(duration_str[:-1])
+            muted_until = (datetime.now() + timedelta(days=days)).isoformat()
+        elif duration_str.endswith("h"):
+            hours = int(duration_str[:-1])
+            muted_until = (datetime.now() + timedelta(hours=hours)).isoformat()
+        elif duration_str.endswith("m"):
+            minutes = int(duration_str[:-1])
+            muted_until = (datetime.now() + timedelta(minutes=minutes)).isoformat()
+        else:
+            await message.reply("❌ Неверный формат длительности! Используйте: forever, 1d, 2h, 30m")
+            return
+    except ValueError:
+        await message.reply("❌ Неверный формат длительности!")
+        return
+
+    conn = await get_db()
+    try:
+        await conn.execute(
+            "UPDATE users SET is_muted = 1, muted_until = ? WHERE user_id = ?",
+            (muted_until, target_id),
+        )
+        await conn.execute(
+            "INSERT OR REPLACE INTO muted_users (user_id, username, reason, muted_at, muted_until) VALUES (?, ?, ?, ?, ?)",
+            (target_id, user["username"], reason, datetime.now().isoformat(), muted_until),
+        )
+        await conn.commit()
+    finally:
+        await conn.close()
+
+    name = f"@{user['username']}" if user['username'] else f"ID {user['user_id']}"
+    duration_text = "навсегда" if not muted_until else f"до {muted_until}"
+    await message.reply(f"✅ {name} замучен {duration_text}.\nПричина: {reason}")
+
+    try:
+        await bot.send_message(
+            target_id,
+            f"🔇 Вы замучены!\nПричина: {reason}\nСрок: {duration_text}",
+        )
+    except Exception:
+        pass
+
+    async with active_games_lock:
+        for rid, g in list(active_games.items()):
+            if not g.is_finished and target_id in (g.player1, g.player2 if g.player2 else -1):
+                g.is_finished = True
+                del active_games[rid]
+                try:
+                    if g.player2:
+                        await update_balance(g.player1, g.bet, "refund")
+                        await update_balance(g.player2, g.bet, "refund")
+                    else:
+                        await update_balance(g.player1, g.bet, "refund")
+                    await bot.send_message(g.chat_id, f"⏹ Игра отменена — игрок {name} замучен.")
+                except Exception:
+                    pass
+
+    await state.clear()
 
 
 @router.callback_query(F.data.startswith("unmute_user_"))
@@ -1217,18 +1412,24 @@ async def cmd_mute_user(message: Message):
         return
 
     parts = message.text.split(maxsplit=3)
-    if len(parts) < 3:
-        await message.reply("❌ Формат: `/мут [@username или ID] [длительность] [причина]`\n"
-                            "Пример: `/мут @user 1d Спам`\n"
-                            "Длительность: forever, 1d, 2h, 30m")
+
+    if len(parts) < 2:
+        await message.reply(
+            "🔇 **Команда /мут**\n\n"
+            "Формат:\n"
+            "  `/мут [@username] [длительность] [причина]`\n"
+            "  `/мут [ID] [длительность] [причина]`\n\n"
+            "Длительность: `forever`, `1d` (дни), `2h` (часы), `30m` (минуты)\n\n"
+            "Примеры:\n"
+            "  `/мут @durov 1d Спам`\n"
+            "  `/мут 123456789 forever`\n"
+            "  `/мут @user 30m`\n\n"
+            "Также можно выбрать пользователя через меню: `/админы`"
+        )
         return
 
     target = parts[1].lstrip("@")
-    duration_str = parts[2].lower()
-    reason = parts[3] if len(parts) > 3 else "Без причины"
-
     target_id = None
-    target_username = target
 
     try:
         target_id = int(target)
@@ -1237,13 +1438,25 @@ async def cmd_mute_user(message: Message):
         if user_data:
             target_id = user_data["user_id"]
         else:
-            await message.reply(f"❌ Пользователь @{target} не найден в базе!")
+            await message.reply(f"❌ Пользователь @{target} не найден в базе данных!")
+            await message.reply("💡 Попробуйте найти через меню: `/админы` → «Замутить игрока»")
             return
 
     user = await get_user(target_id)
     if not user:
         await message.reply(f"❌ Пользователь с ID {target_id} не найден!")
         return
+
+    if len(parts) < 3:
+        await message.reply(
+            f"❌ Укажите длительность!\n"
+            f"Формат: `/мут {parts[1]} [длительность] [причина]`\n"
+            f"Длительность: `forever`, `1d`, `2h`, `30m`"
+        )
+        return
+
+    duration_str = parts[2].lower()
+    reason = parts[3] if len(parts) > 3 else "Без причины"
 
     try:
         if duration_str == "forever":
@@ -1290,13 +1503,20 @@ async def cmd_mute_user(message: Message):
     except Exception:
         pass
 
-    if target_id in [g.player1 for g in active_games.values()] or target_id in [g.player2 for g in active_games.values() if g.player2]:
-        async with active_games_lock:
-            for rid, g in list(active_games.items()):
-                if target_id in (g.player1, g.player2) and not g.is_finished:
-                    g.is_finished = True
-                    del active_games[rid]
+    async with active_games_lock:
+        for rid, g in list(active_games.items()):
+            if not g.is_finished and target_id in (g.player1, g.player2 if g.player2 else -1):
+                g.is_finished = True
+                del active_games[rid]
+                try:
+                    if g.player2:
+                        await update_balance(g.player1, g.bet, "refund")
+                        await update_balance(g.player2, g.bet, "refund")
+                    else:
+                        await update_balance(g.player1, g.bet, "refund")
                     await bot.send_message(g.chat_id, f"⏹ Игра отменена — игрок {name} замучен.")
+                except Exception:
+                    pass
 
 
 @router.message(Command("размут"))
@@ -1306,7 +1526,16 @@ async def cmd_unmute_user(message: Message):
 
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
-        await message.reply("❌ Формат: `/размут [@username или ID]`")
+        await message.reply(
+            "🔊 **Команда /размут**\n\n"
+            "Формат:\n"
+            "  `/размут [@username]`\n"
+            "  `/размут [ID]`\n\n"
+            "Примеры:\n"
+            "  `/размут @durov`\n"
+            "  `/размут 123456789`\n\n"
+            "Также можно выбрать через меню: `/админы` → «Размутить игрока»"
+        )
         return
 
     target = parts[1].lstrip("@")
@@ -1344,7 +1573,7 @@ async def cmd_unmute_user(message: Message):
         pass
 
 
-# ─── Game Creation ────────────────────────────────────────────────────────────
+# ─── Game Creation (PVP) ─────────────────────────────────────────────────────
 
 
 def make_game_handler(game_type: str):
@@ -1434,7 +1663,7 @@ for gt in GAMES_CONFIG:
     make_game_handler(gt)
 
 
-# ─── Join Game ────────────────────────────────────────────────────────────────
+# ─── Join Game (PVP) ─────────────────────────────────────────────────────────
 
 
 @router.callback_query(F.data.startswith("join_"))
@@ -1638,7 +1867,6 @@ async def determine_winner(game: GameRoom):
                 f"{result_msg}"
             )
 
-        # ── Cleanup messages ──
         try:
             if game.player1_dice_message_id:
                 await bot.delete_message(game.chat_id, game.player1_dice_message_id)
@@ -1683,9 +1911,6 @@ async def determine_winner(game: GameRoom):
                 del active_games[game.room_id]
 
 
-# ─── Timeout ──────────────────────────────────────────────────────────────────
-
-
 async def game_timeout(room_id: str, delay: int):
     await asyncio.sleep(delay)
 
@@ -1724,6 +1949,372 @@ async def auto_roll_dice(game: GameRoom):
         game.results[game.player2] = d2.dice.value
 
     await determine_winner(game)
+
+
+# ─── Blackjack (21+) ──────────────────────────────────────────────────────────
+
+
+def draw_card() -> int:
+    card = random.randint(1, 13)
+    if card > 10:
+        return 10
+    if card == 1:
+        return 11
+    return card
+
+
+def hand_value(cards: list[int]) -> int:
+    total = sum(cards)
+    aces = cards.count(11)
+    while total > 21 and aces > 0:
+        total -= 10
+        aces -= 1
+    return total
+
+
+def cards_str(cards: list[int]) -> str:
+    names = {1: "A", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6", 7: "7", 8: "8", 9: "9", 10: "10", 11: "A"}
+    return " + ".join(names.get(c, str(c)) for c in cards)
+
+
+@router.message(Command("блекджек"))
+async def cmd_blackjack(message: Message):
+    if message.chat.type == "private":
+        await message.reply("🃏 Блэкджек доступен только в группах! Добавьте бота в группу.")
+        return
+
+    if await is_user_muted(message.from_user.id):
+        await message.reply("❌ Вы замучены и не можете играть.")
+        return
+
+    parts = message.text.split()
+    if len(parts) < 2:
+        await message.reply(
+            "🃏 **Блэкджек**\n\n"
+            "Формат: `/блекджек [ставка]`\n"
+            "Пример: `/блекджек 50`\n\n"
+            "Правила: наберите 21 или близко к 21, не перебирая.\n"
+            "До 6 игроков за столом. Каждый играет против дилера."
+        )
+        return
+
+    try:
+        bet = int(parts[1])
+    except ValueError:
+        await message.reply("❌ Ставка должна быть числом!")
+        return
+
+    if bet < 10:
+        await message.reply("❌ Минимальная ставка — 10 монет!")
+        return
+
+    user = await get_user(message.from_user.id)
+    if not user:
+        await create_user(message.from_user)
+        user = await get_user(message.from_user.id)
+
+    bal = user["blackjack_balance"]
+    if bal < bet:
+        await message.reply(f"❌ Недостаточно средств для блэкджека! Баланс: {bal} монет")
+        return
+
+    await update_blackjack_balance(message.from_user.id, -bet, "bj_reserve")
+
+    room_id = f"bj-{uuid.uuid4()}"
+    game = BlackjackRoom(room_id, bet, message.from_user.id, message.chat.id)
+    game.players[message.from_user.id] = []
+    game.player_names[message.from_user.id] = await get_username(message.from_user.id)
+
+    async with active_games_lock:
+        active_blackjack_games[room_id] = game
+
+    players_str = await get_username(message.from_user.id)
+    msg = await message.answer(
+        f"🃏 **Блэкджек стол!**\n"
+        f"💵 Ставка: {bet} монет\n\n"
+        f"👤 Игроки за столом:\n{players_str}\n\n"
+        f"Нажмите «Присоединиться» или «Старт» для начала.",
+        reply_markup=blackjack_join_keyboard(room_id),
+    )
+    game.join_message_id = msg.message_id
+    game.phase = "joining"
+
+    asyncio.ensure_future(blackjack_join_timeout(room_id, 60))
+
+
+async def blackjack_join_timeout(room_id: str, delay: int):
+    await asyncio.sleep(delay)
+    async with active_games_lock:
+        game = active_blackjack_games.get(room_id)
+        if not game or game.is_finished or game.phase != "joining":
+            return
+        if len(game.players) < 1:
+            await update_blackjack_balance(game.creator_id, game.bet, "bj_refund")
+            game.is_finished = True
+            del active_blackjack_games[room_id]
+            try:
+                await bot.send_message(game.chat_id, "⏰ Блэкджек отменён — никто не присоединился.")
+            except Exception:
+                pass
+
+
+@router.callback_query(F.data.startswith("bj_join_"))
+async def cb_bj_join(call: CallbackQuery):
+    room_id = call.data.split("_", 2)[2]
+    async with active_games_lock:
+        game = active_blackjack_games.get(room_id)
+        if not game or game.is_finished or game.phase != "joining":
+            await call.answer("❌ Игра уже началась или завершена!", show_alert=True)
+            return
+
+        if call.from_user.id in game.players:
+            await call.answer("✅ Вы уже за этим столом!", show_alert=True)
+            return
+
+        if len(game.players) >= 6:
+            await call.answer("❌ За столом уже 6 игроков!", show_alert=True)
+            return
+
+        user = await get_user(call.from_user.id)
+        if not user or user["blackjack_balance"] < game.bet:
+            await call.answer("❌ Недостаточно средств для блэкджека!", show_alert=True)
+            return
+
+        await update_blackjack_balance(call.from_user.id, -game.bet, "bj_reserve")
+        game.players[call.from_user.id] = []
+        game.player_names[call.from_user.id] = await get_username(call.from_user.id)
+
+    players_list = "\n".join(game.player_names.values())
+    try:
+        await bot.edit_message_text(
+            chat_id=game.chat_id,
+            message_id=game.join_message_id,
+            text=(
+                f"🃏 **Блэкджек стол!**\n"
+                f"💵 Ставка: {game.bet} монет\n\n"
+                f"👤 Игроки за столом ({len(game.players)}/6):\n{players_list}\n\n"
+                f"Нажмите «Старт» для начала игры."
+            ),
+            reply_markup=blackjack_join_keyboard(room_id),
+        )
+    except Exception:
+        pass
+
+    await call.answer("✅ Вы присоединились к блэкджеку!")
+
+
+@router.callback_query(F.data.startswith("bj_start_"))
+async def cb_bj_start(call: CallbackQuery):
+    room_id = call.data.split("_", 2)[2]
+    async with active_games_lock:
+        game = active_blackjack_games.get(room_id)
+        if not game or game.is_finished:
+            await call.answer("❌ Игра не найдена!", show_alert=True)
+            return
+
+        if call.from_user.id != game.creator_id:
+            await call.answer("❌ Только создатель стола может начать игру!", show_alert=True)
+            return
+
+        if game.phase != "joining":
+            await call.answer("❌ Игра уже началась!", show_alert=True)
+            return
+
+        if len(game.players) < 1:
+            await call.answer("❌ Нет игроков за столом!", show_alert=True)
+            return
+
+        game.phase = "playing"
+
+    await start_blackjack_round(game)
+    await call.answer()
+
+
+async def start_blackjack_round(game: BlackjackRoom):
+    game.dealer_cards = [draw_card(), draw_card()]
+
+    for pid in game.players:
+        game.players[pid] = [draw_card(), draw_card()]
+        game.player_status[pid] = "playing"
+
+    dealer_visible = cards_str([game.dealer_cards[0]]) + " + ?"
+    players_text = ""
+    for pid, cards in game.players.items():
+        name = game.player_names[pid]
+        val = hand_value(cards)
+        players_text += f"{name}: {cards_str(cards)} = **{val}**\n"
+
+    text = (
+        f"🃏 **Блэкджек начался!**\n"
+        f"💵 Ставка: {game.bet} монет\n\n"
+        f"🎴 Дилер: {dealer_visible}\n\n"
+        f"👤 Игроки:\n{players_text}\n\n"
+        f"Первым ходит: {game.player_names[game.creator_id]}"
+    )
+
+    try:
+        if game.join_message_id:
+            await bot.delete_message(game.chat_id, game.join_message_id)
+    except Exception:
+        pass
+
+    sent = await bot.send_message(game.chat_id, text)
+    game.message_id = sent.message_id
+
+    await ask_bj_player_decision(game, game.creator_id)
+
+
+async def ask_bj_player_decision(game: BlackjackRoom, player_id: int):
+    cards = game.players[player_id]
+    val = hand_value(cards)
+    name = game.player_names[player_id]
+
+    if val == 21:
+        game.player_status[player_id] = "stand"
+        await bot.send_message(game.chat_id, f"🎉 {name} набрал 21! Авто-стоп.")
+        await next_bj_player(game, player_id)
+        return
+
+    if val > 21:
+        game.player_status[player_id] = "bust"
+        await bot.send_message(game.chat_id, f"💥 {name} перебрал ({val})! Вы проиграли.")
+        await next_bj_player(game, player_id)
+        return
+
+    await bot.send_message(
+        player_id,
+        f"🃏 **Ваш ход в блэкджек!**\n"
+        f"💵 Ставка: {game.bet}\n"
+        f"Ваши карты: {cards_str(cards)} = **{val}**\n"
+        f"Карта дилера: {cards_str([game.dealer_cards[0]])} + ?\n\n"
+        f"👊 Ещё — взять карту\n"
+        f"✋ Стоп — оставить как есть",
+        reply_markup=blackjack_action_keyboard(game.room_id, player_id),
+    )
+
+
+async def next_bj_player(game: BlackjackRoom, current_player_id: int):
+    player_ids = list(game.players.keys())
+    current_idx = player_ids.index(current_player_id)
+    next_idx = current_idx + 1
+
+    while next_idx < len(player_ids):
+        next_pid = player_ids[next_idx]
+        if game.player_status.get(next_pid) == "playing":
+            await ask_bj_player_decision(game, next_pid)
+            return
+        next_idx += 1
+
+    await play_bj_dealer(game)
+
+
+@router.callback_query(F.data.startswith("bj_hit_"))
+async def cb_bj_hit(call: CallbackQuery):
+    parts = call.data.split("_")
+    room_id = parts[2]
+    player_id = int(parts[3])
+
+    if call.from_user.id != player_id:
+        await call.answer("❌ Сейчас не ваш ход!", show_alert=True)
+        return
+
+    async with active_games_lock:
+        game = active_blackjack_games.get(room_id)
+        if not game or game.is_finished or game.phase != "playing":
+            await call.answer("❌ Игра завершена!", show_alert=True)
+            return
+
+        if game.player_status.get(player_id) != "playing":
+            await call.answer("❌ Вы уже остановились!", show_alert=True)
+            return
+
+        card = draw_card()
+        game.players[player_id].append(card)
+        val = hand_value(game.players[player_id])
+        name = game.player_names[player_id]
+        cards = game.players[player_id]
+
+    await call.message.edit_text(f"🎴 {name} берёт карту: {cards_str(cards)} = **{val}**")
+
+    if val > 21:
+        game.player_status[player_id] = "bust"
+        await bot.send_message(game.chat_id, f"💥 {name} перебрал ({val})! Вы проиграли.")
+        await next_bj_player(game, player_id)
+    elif val == 21:
+        game.player_status[player_id] = "stand"
+        await bot.send_message(game.chat_id, f"🎉 {name} набрал 21!")
+        await next_bj_player(game, player_id)
+    else:
+        await ask_bj_player_decision(game, player_id)
+
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("bj_stand_"))
+async def cb_bj_stand(call: CallbackQuery):
+    parts = call.data.split("_")
+    room_id = parts[2]
+    player_id = int(parts[3])
+
+    if call.from_user.id != player_id:
+        await call.answer("❌ Сейчас не ваш ход!", show_alert=True)
+        return
+
+    async with active_games_lock:
+        game = active_blackjack_games.get(room_id)
+        if not game or game.is_finished or game.phase != "playing":
+            await call.answer("❌ Игра завершена!", show_alert=True)
+            return
+
+        if game.player_status.get(player_id) != "playing":
+            await call.answer("❌ Вы уже остановились!", show_alert=True)
+            return
+
+        game.player_status[player_id] = "stand"
+        name = game.player_names[player_id]
+        cards = game.players[player_id]
+        val = hand_value(cards)
+
+    await call.message.edit_text(f"✋ {name} остановился. Очки: **{val}**")
+    await next_bj_player(game, player_id)
+    await call.answer()
+
+
+async def play_bj_dealer(game: BlackjackRoom):
+    dealer = game.dealer_cards
+    dealer_val = hand_value(dealer)
+    while dealer_val < 17:
+        card = draw_card()
+        dealer.append(card)
+        dealer_val = hand_value(dealer)
+
+    dealer_str = cards_str(dealer)
+    result = (
+        f"🎴 **Дилер:** {dealer_str} = **{dealer_val}**\n\n"
+        f"📊 **Результаты:**\n"
+    )
+
+    for pid, cards in game.players.items():
+        name = game.player_names[pid]
+        player_val = hand_value(cards)
+        if player_val > 21:
+            result += f"❌ {name}: {player_val} — перебор\n"
+        elif dealer_val > 21 or player_val > dealer_val:
+            result += f"🏆 {name}: {player_val} — победа! +{game.bet * 2}\n"
+            await update_blackjack_balance(pid, game.bet * 2, "bj_win")
+        elif player_val == dealer_val:
+            result += f"🎭 {name}: {player_val} — ничья\n"
+            await update_blackjack_balance(pid, game.bet, "bj_tie")
+        else:
+            result += f"❌ {name}: {player_val} — проигрыш\n"
+
+    await bot.send_message(game.chat_id, result)
+    game.is_finished = True
+    game.phase = "finished"
+
+    async with active_games_lock:
+        if game.room_id in active_blackjack_games:
+            del active_blackjack_games[game.room_id]
 
 
 # ─── Startup ──────────────────────────────────────────────────────────────────
