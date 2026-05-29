@@ -3,9 +3,7 @@ __pycache__/
 *.pyc
 .idea/
 bot_errors.log
-chat.db
-casino/chat.db
-casino/.env
+*.db
 .env
 
 *.txt
