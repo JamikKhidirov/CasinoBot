@@ -175,7 +175,7 @@ async def cb_casino_solo_bet(call: CallbackQuery, state: FSMContext):
         await call.answer("❌ Минимальная ставка — 10!", show_alert=True)
         return
 
-    await call.message.delete()
+    await call.message.edit_text(f"🎲 <b>{GAMES_CONFIG[game_type]['emoji']} Игра с ботом</b>\nЗапускаем...")
     await call.answer()
     await solo_game_play(call.message, game_type, bet)
 
