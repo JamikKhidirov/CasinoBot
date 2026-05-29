@@ -391,61 +391,35 @@ async def determine_winner(game: GameRoom):
             await update_balance(game.player1, game.bet, "refund")
             if game.player2:
                 await update_balance(game.player2, game.bet, "refund")
-                final = "⏰ Игра отменена — один из игроков не сделал бросок.\nСтавки возвращены обоим игрокам."
+                result_msg = "⏰ Игра отменена — один из игроков не сделал бросок.\nСтавки возвращены обоим игрокам."
             else:
-                final = "⏰ Игра отменена — никто не присоединился."
+                result_msg = "⏰ Игра отменена — никто не присоединился."
         else:
-            if game.game_type == "футбол":
-                p1_score_goal = p1_score > 2
-                p2_score_goal = p2_score > 2
-                if p1_score_goal and p2_score_goal:
+            is_goal_game = game.game_type in ("футбол", "баскетбол")
+            if is_goal_game:
+                p1_hit = p1_score > 2
+                p2_hit = p2_score > 2
+                if p1_hit and p2_hit:
                     await update_balance(game.player1, game.bet, "refund")
                     await update_balance(game.player2, game.bet, "refund")
-                    result_msg = "⚽ Оба забили гол! Ничья — ставки возвращены."
-                elif p1_score_goal:
+                    result_msg = f"{GAMES_CONFIG[game.game_type]['emoji']} Оба забили! Ничья — ставки возвращены."
+                elif p1_hit:
                     winner = game.player1
-                    result_msg = f"⚽ Гол! {await get_username(winner)} забивает и побеждает!\n💰 Выигрыш: {prize} монет\n💼 Комиссия: {commission} монет"
-                elif p2_score_goal:
+                elif p2_hit:
                     winner = game.player2
-                    result_msg = f"⚽ Гол! {await get_username(winner)} забивает и побеждает!\n💰 Выигрыш: {prize} монет\n💼 Комиссия: {commission} монет"
                 else:
                     await update_balance(game.player1, game.bet, "refund")
                     await update_balance(game.player2, game.bet, "refund")
-                    result_msg = "⚽ Оба промахнулись! Ничья — ставки возвращены."
-            elif game.game_type == "баскетбол":
-                p1_basket = p1_score > 2
-                p2_basket = p2_score > 2
-                if p1_basket and p2_basket:
-                    await update_balance(game.player1, game.bet, "refund")
-                    await update_balance(game.player2, game.bet, "refund")
-                    result_msg = "🏀 Оба попали в кольцо! Ничья — ставки возвращены."
-                elif p1_basket:
-                    winner = game.player1
-                    result_msg = f"🏀 Попадание! {await get_username(winner)} забивает и побеждает!\n💰 Выигрыш: {prize} монет\n💼 Комиссия: {commission} монет"
-                elif p2_basket:
-                    winner = game.player2
-                    result_msg = f"🏀 Попадание! {await get_username(winner)} забивает и побеждает!\n💰 Выигрыш: {prize} монет\n💼 Комиссия: {commission} монет"
-                else:
-                    await update_balance(game.player1, game.bet, "refund")
-                    await update_balance(game.player2, game.bet, "refund")
-                    result_msg = "🏀 Оба промахнулись! Ничья — ставки возвращены."
-            elif game.game_type != "куб":
-                if p1_score < 2 and p2_score < 2:
-                    await update_balance(game.player1, game.bet, "refund")
-                    await update_balance(game.player2, game.bet, "refund")
-                    result_msg = "🎭 Ничья! Ставки возвращены."
-                elif p1_score < 2:
-                    winner = game.player2
-                elif p2_score < 2:
-                    winner = game.player1
-                elif p1_score > p2_score:
+                    result_msg = f"{GAMES_CONFIG[game.game_type]['emoji']} Оба промахнулись! Ничья — ставки возвращены."
+            elif game.game_type in ("дротики", "боулинг"):
+                if p1_score > p2_score:
                     winner = game.player1
                 elif p2_score > p1_score:
                     winner = game.player2
                 else:
                     await update_balance(game.player1, game.bet, "refund")
                     await update_balance(game.player2, game.bet, "refund")
-                    result_msg = "🎭 Ничья! Ставки возвращены обоим игрокам."
+                    result_msg = "🎭 Ничья! Ставки возвращены."
             else:
                 if p1_score > p2_score:
                     winner = game.player1
@@ -454,42 +428,49 @@ async def determine_winner(game: GameRoom):
                 else:
                     await update_balance(game.player1, game.bet, "refund")
                     await update_balance(game.player2, game.bet, "refund")
-                    result_msg = "🎭 Ничья! Ставки возвращены обоим игрокам."
+                    result_msg = "🎭 Ничья! Ставки возвращены."
 
             if winner and not result_msg:
                 await update_balance(winner, prize, "win")
-                result_msg = f"🏆 Победитель: {await get_username(winner)}\n💰 Выигрыш: {prize} монет\n💼 Комиссия: {commission} монет"
+                emoji = GAMES_CONFIG[game.game_type]["emoji"]
+                result_msg = (
+                    f"🏆 Победитель: {await get_username(winner)}\n"
+                    f"💰 Выигрыш: {prize} монет\n💼 Комиссия: {commission} монет"
+                )
                 conn = await get_db()
                 try:
                     await conn.execute(
                         "UPDATE users SET games_played = games_played + 1, wins = wins + 1 WHERE user_id = ?",
                         (winner,),
                     )
-                    loser = game.player2 if winner == game.player1 else game.player1
-                    await conn.execute(
-                        "UPDATE users SET games_played = games_played + 1 WHERE user_id = ?",
-                        (loser,),
-                    )
+                    loser_id = game.player2 if winner == game.player1 else game.player1
+                    if loser_id:
+                        await conn.execute(
+                            "UPDATE users SET games_played = games_played + 1 WHERE user_id = ?",
+                            (loser_id,),
+                        )
                     await conn.commit()
-                except:
+                except Exception:
                     pass
                 finally:
                     await conn.close()
 
-            def score_label(score, game_type):
-                if game_type in ("футбол", "баскетбол"):
-                    return "✅ Гол" if score > 2 else "❌ Промах"
-                return str(score)
+        p1_label = str(p1_score)
+        p2_label = str(p2_score)
+        if game.game_type in ("футбол", "баскетбол"):
+            p1_label = "✅ Гол" if p1_score > 2 else "❌ Промах"
+            p2_label = "✅ Гол" if p2_score > 2 else "❌ Промах"
+        elif game.game_type in ("дротики", "боулинг"):
+            p1_label = f"🎯 {p1_score}"
+            p2_label = f"🎯 {p2_score}"
 
-            logger.info(f"🏁 Итоги {game.game_type}: {await get_username(game.player1)}={p1_score}, {await get_username(game.player2)}={p2_score} (комната {game.room_id})")
-
-            if not result_msg:
-                final = (
-                    f"🎲 Результаты игры в {GAMES_CONFIG[game.game_type]['emoji']}:\n"
-                    f"{await get_username(game.player1)}: {score_label(p1_score, game.game_type)}\n"
-                    f"{await get_username(game.player2)}: {score_label(p2_score, game.game_type)}\n\n"
-                    f"{result_msg}"
-                )
+        emoji = GAMES_CONFIG[game.game_type]["emoji"]
+        final = (
+            f"🎲 Игра {emoji} завершена!\n\n"
+            f"{await get_username(game.player1)}: {p1_label}\n"
+            f"{await get_username(game.player2)}: {p2_label}\n\n"
+            f"{result_msg}"
+        )
 
         try:
             if game.player1_dice_message_id:
@@ -507,13 +488,11 @@ async def determine_winner(game: GameRoom):
         except Exception as e:
             logger.error(f"Ошибка при удалении сообщений: {e}")
 
-        await get_bot().send_message(game.chat_id, final)
+        await get_bot().send_message(game.chat_id, final, parse_mode="HTML")
 
-        if game.player2:
-            await get_bot().send_message(game.player1, f"🎮 Игра завершена!\n{final}")
-            await get_bot().send_message(game.player2, f"🎮 Игра завершена!\n{final}")
-        else:
-            await get_bot().send_message(game.player1, f"🎮 Игра завершена!\n{final}")
+        for pid in (game.player1, game.player2):
+            if pid:
+                await get_bot().send_message(pid, f"🎮 Игра завершена!\n{final}", parse_mode="HTML")
 
         game.is_finished = True
 
@@ -712,8 +691,8 @@ async def cb_casino_pick_bet(call: CallbackQuery, state: FSMContext):
         await call.answer(f"❌ Недостаточно средств! Баланс: {user['balance']}", show_alert=True)
         return
 
-    await create_game_for_user(call.message, call.from_user, call.from_user.id, game_type, bet)
     await call.answer()
+    await create_game_for_user(call.message, call.from_user, call.from_user.id, game_type, bet)
 
 
 @router.message(GameStates.waiting_for_bet)
