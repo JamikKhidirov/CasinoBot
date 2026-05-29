@@ -45,7 +45,7 @@ async def cmd_blackjack(message: Message):
     parts = message.text.split()
     if len(parts) < 2:
         await message.reply(
-            "🃏 **Блэкджек**\n\n"
+            "🃏 <b>Блэкджек</b>\n\n"
             "Формат: /блекджек [ставка]\n"
             "Пример: /блекджек 50\n\n"
             "Правила: наберите 21 или близко к 21, не перебирая.\n"
@@ -85,7 +85,7 @@ async def cmd_blackjack(message: Message):
 
     players_str = await get_username(message.from_user.id)
     msg = await message.answer(
-        f"🃏 **Блэкджек стол!**\n"
+        f"🃏 <b>Блэкджек стол!</b>\n"
         f"💵 Ставка: {bet} монет\n\n"
         f"👤 Игроки за столом:\n{players_str}\n\n"
         f"Нажмите «Присоединиться» или «Старт» для начала.",
@@ -150,7 +150,7 @@ async def cb_bj_join(call: CallbackQuery):
             chat_id=game.chat_id,
             message_id=game.join_message_id,
             text=(
-                f"🃏 **Блэкджек стол!**\n"
+                f"🃏 <b>Блэкджек стол!</b>\n"
                 f"💵 Ставка: {game.bet} монет\n\n"
                 f"👤 Игроки за столом ({len(game.players)}/6):\n{players_list}\n\n"
                 f"Нажмите «Старт» для начала игры."
@@ -202,10 +202,10 @@ async def start_blackjack_round(game: BlackjackRoom):
     for pid, cards in game.players.items():
         name = game.player_names[pid]
         val = hand_value(cards)
-        players_text += f"{name}: {cards_str(cards)} = **{val}**\n"
+        players_text += f"{name}: {cards_str(cards)} = <b>{val}</b>\n"
 
     text = (
-        f"🃏 **Блэкджек начался!**\n"
+        f"🃏 <b>Блэкджек начался!</b>\n"
         f"💵 Ставка: {game.bet} монет\n\n"
         f"🎴 Дилер: {dealer_visible}\n\n"
         f"👤 Игроки:\n{players_text}\n\n"
@@ -224,7 +224,55 @@ async def start_blackjack_round(game: BlackjackRoom):
     await ask_bj_player_decision(game, game.creator_id)
 
 
+async def cancel_bj_timer(game: BlackjackRoom):
+    if game.timer_task and not game.timer_task.done():
+        game.timer_task.cancel()
+        game.timer_task = None
+    if game.timer_message_id:
+        try:
+            await get_bot().delete_message(game.chat_id, game.timer_message_id)
+        except Exception:
+            pass
+        game.timer_message_id = None
+
+
+async def bj_player_timer(game: BlackjackRoom, player_id: int, total: int = 30):
+    try:
+        for remaining in range(total, 0, -5):
+            if game.is_finished or game.player_status.get(player_id) != "playing":
+                return
+            game.timer_seconds = remaining
+            text = f"⏱ <b>{game.player_names[player_id]}</b>: <b>{remaining}</b> сек осталось"
+            if game.timer_message_id:
+                try:
+                    await get_bot().edit_message_text(text, chat_id=game.chat_id, message_id=game.timer_message_id)
+                except Exception:
+                    try:
+                        sent = await get_bot().send_message(game.chat_id, text)
+                        game.timer_message_id = sent.message_id
+                    except Exception:
+                        pass
+            else:
+                try:
+                    sent = await get_bot().send_message(game.chat_id, text)
+                    game.timer_message_id = sent.message_id
+                except Exception:
+                    pass
+            await asyncio.sleep(5)
+
+        if not game.is_finished and game.player_status.get(player_id) == "playing":
+            name = game.player_names[player_id]
+            game.player_status[player_id] = "stand"
+            await get_bot().send_message(game.chat_id, f"⏰ <b>{name}</b> — время вышло! Авто-стоп.")
+            await next_bj_player(game, player_id)
+    except asyncio.CancelledError:
+        pass
+
+
 async def ask_bj_player_decision(game: BlackjackRoom, player_id: int):
+    await cancel_bj_timer(game)
+    game.current_player = player_id
+
     cards = game.players[player_id]
     val = hand_value(cards)
     name = game.player_names[player_id]
@@ -241,12 +289,15 @@ async def ask_bj_player_decision(game: BlackjackRoom, player_id: int):
         await next_bj_player(game, player_id)
         return
 
+    game.timer_task = asyncio.ensure_future(bj_player_timer(game, player_id, 30))
+
     await get_bot().send_message(
         player_id,
-        f"🃏 **Ваш ход в блэкджек!**\n"
+        f"🃏 <b>Ваш ход в блэкджек!</b>\n"
         f"💵 Ставка: {game.bet}\n"
-        f"Ваши карты: {cards_str(cards)} = **{val}**\n"
+        f"Ваши карты: {cards_str(cards)} = <b>{val}</b>\n"
         f"Карта дилера: {cards_str([game.dealer_cards[0]])} + ?\n\n"
+        f"⏱ У вас 30 секунд!\n"
         f"👊 Ещё — взять карту\n"
         f"✋ Стоп — оставить как есть",
         reply_markup=blackjack_action_keyboard(game.room_id, player_id),
@@ -254,6 +305,7 @@ async def ask_bj_player_decision(game: BlackjackRoom, player_id: int):
 
 
 async def next_bj_player(game: BlackjackRoom, current_player_id: int):
+    await cancel_bj_timer(game)
     player_ids = list(game.players.keys())
     current_idx = player_ids.index(current_player_id)
     next_idx = current_idx + 1
@@ -294,7 +346,8 @@ async def cb_bj_hit(call: CallbackQuery):
         name = game.player_names[player_id]
         cards = game.players[player_id]
 
-    await call.message.edit_text(f"🎴 {name} берёт карту: {cards_str(cards)} = **{val}**")
+    await cancel_bj_timer(game)
+    await call.message.edit_text(f"🎴 {name} берёт карту: {cards_str(cards)} = <b>{val}</b>")
 
     if val > 21:
         game.player_status[player_id] = "bust"
@@ -335,12 +388,14 @@ async def cb_bj_stand(call: CallbackQuery):
         cards = game.players[player_id]
         val = hand_value(cards)
 
-    await call.message.edit_text(f"✋ {name} остановился. Очки: **{val}**")
+    await cancel_bj_timer(game)
+    await call.message.edit_text(f"✋ {name} остановился. Очки: <b>{val}</b>")
     await next_bj_player(game, player_id)
     await call.answer()
 
 
 async def play_bj_dealer(game: BlackjackRoom):
+    await cancel_bj_timer(game)
     dealer = game.dealer_cards
     dealer_val = hand_value(dealer)
     while dealer_val < 17:
@@ -350,8 +405,8 @@ async def play_bj_dealer(game: BlackjackRoom):
 
     dealer_str = cards_str(dealer)
     result = (
-        f"🎴 **Дилер:** {dealer_str} = **{dealer_val}**\n\n"
-        f"📊 **Результаты:**\n"
+        f"🎴 <b>Дилер:</b> {dealer_str} = <b>{dealer_val}</b>\n\n"
+        f"📊 <b>Результаты:</b>\n"
     )
 
     for pid, cards in game.players.items():
@@ -425,7 +480,7 @@ async def cb_casino_bj_bet(call: CallbackQuery, state: FSMContext):
         active_blackjack_games[room_id] = game
 
     sent = await call.message.answer(
-        f"🃏 **Блэкджек стол!**\n"
+        f"🃏 <b>Блэкджек стол!</b>\n"
         f"💵 Ставка: {bet} 🪙\n"
         f"👤 {game.player_names[call.from_user.id]} (создатель)\n"
         f"👥 Места: 1/6\n\n"

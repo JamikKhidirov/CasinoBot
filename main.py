@@ -86,7 +86,7 @@ async def main():
         logger.error(f"Ошибка инициализации БД: {e}")
         return
 
-    bot = Bot(token=config.BOT_TOKEN)
+    bot = Bot(token=config.BOT_TOKEN, parse_mode="HTML")
     casino_setup(bot)
     dp = Dispatcher()
 

@@ -23,11 +23,11 @@ async def create_game_for_user(message: Message, tg_user, user_id: int, game_typ
     if message.chat.type == "private":
         bot_username = (await get_bot().me()).username
         text = (
-            "👥 **Игра с игроками** доступна **только в групповых чатах**!\n\n"
-            "📌 **Как играть:**\n"
+            "👥 <b>Игра с игроками</b> доступна <b>только в групповых чатах</b>!\n\n"
+            "📌 <b>Как играть:</b>\n"
             "1. Добавьте бота в группу: @{}\n"
             "2. Напишите в группе команду\n\n"
-            "🤖 **Хотите сыграть с ботом?** Используйте `/сботом {} [ставка]` в ЛС!"
+            "🤖 <b>Хотите сыграть с ботом?</b> Используйте `/сботом {} [ставка]` в ЛС!"
         ).format(bot_username, GAMES_CONFIG[game_type]["command"])
         await message.reply(text)
         return
@@ -59,7 +59,7 @@ async def create_game_for_user(message: Message, tg_user, user_id: int, game_typ
     p1_name = await get_username(user_id)
 
     sent = await message.reply(
-        f"🎉 **Новая игра** в {config['emoji']}!\n"
+        f"🎉 <b>Новая игра</b> в {config['emoji']}!\n"
         f"💵 Ставка: {bet} монет\n"
         f"⏳ Ожидание второго игрока...\n\n"
         f"Игрок 1: {p1_name}\n"
@@ -620,7 +620,7 @@ async def cmd_pvp_game(message: Message):
     parts = message.text.split()
     if len(parts) < 2:
         await message.reply(
-            f"🎮 **{game_type.capitalize()}** {GAMES_CONFIG[game_type]['emoji']}\n\n"
+            f"🎮 <b>{game_type.capitalize()}</b> {GAMES_CONFIG[game_type]['emoji']}\n\n"
             f"Формат: `/{cmd} [ставка]`\n"
             f"Пример: `/{cmd} 50`\n\n"
             f"Игроки по очереди кидают кубик. Кто больше — побеждает."
@@ -742,7 +742,7 @@ async def process_custom_bet(message: Message, state: FSMContext):
         async with active_games_lock:
             active_blackjack_games[room_id] = game
         sent = await message.answer(
-            f"🃏 **Блэкджек стол!**\n"
+            f"🃏 <b>Блэкджек стол!</b>\n"
             f"💵 Ставка: {bet} 🪙\n"
             f"👤 {game.player_names[message.from_user.id]} (создатель)\n"
             f"👥 Места: 1/6\n\n"

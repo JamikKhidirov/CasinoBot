@@ -291,6 +291,10 @@ class BlackjackRoom:
         self.creator_id = creator_id
         self.join_message_id: Optional[int] = None
         self.phase = "joining"
+        self.timer_task: Optional[asyncio.Task] = None
+        self.timer_message_id: Optional[int] = None
+        self.current_player: Optional[int] = None
+        self.timer_seconds: int = 0
 
 
 class GameRoom:

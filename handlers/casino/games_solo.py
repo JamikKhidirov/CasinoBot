@@ -24,7 +24,7 @@ async def cmd_solo_bot(message: Message):
 
     parts = message.text.split()
     if len(parts) < 2:
-        text = "🤖 **Игра с ботом**\n\nФормат: `/сботом [игра] [ставка]`\n\n"
+        text = "🤖 <b>Игра с ботом</b>\n\nФормат: `/сботом [игра] [ставка]`\n\n"
         for game_type, cfg in GAMES_CONFIG.items():
             text += f"/сботом {cfg['command']} [ставка] — {game_type} {cfg['emoji']}\n"
         text += "\nПример: `/сботом куб 50`\n\n"
@@ -83,7 +83,7 @@ async def solo_game_play(message: Message, game_type: str, bet: int):
     player_name = await get_username(message.from_user.id)
 
     msg = await message.reply(
-        f"🎲 **Игра с ботом** {config['emoji']}!\n"
+        f"🎲 <b>Игра с ботом</b> {config['emoji']}!\n"
         f"💵 Ставка: {bet} монет\n\n"
         f"{player_name} бросает..."
     )
@@ -96,7 +96,7 @@ async def solo_game_play(message: Message, game_type: str, bet: int):
     player_adjusted = player_dice.dice.value - 1 if game_type in ("дротики", "боулинг") else player_dice.dice.value
 
     await msg.edit_text(
-        f"🎲 **Игра с ботом** {config['emoji']}!\n"
+        f"🎲 <b>Игра с ботом</b> {config['emoji']}!\n"
         f"💵 Ставка: {bet} монет\n\n"
         f"{player_name}: {player_adjusted}\n"
         f"🤖 Бот: {bot_adjusted}"
@@ -105,7 +105,7 @@ async def solo_game_play(message: Message, game_type: str, bet: int):
     if player_adjusted > bot_adjusted:
         prize = bet * 2
         await update_bot_balance(message.from_user.id, prize, "solo_win")
-        await message.answer(f"🏆 **Вы выиграли!** +{prize} монет")
+        await message.answer(f"🏆 <b>Вы выиграли!</b> +{prize} монет")
         conn = await get_db()
         try:
             await conn.execute(
@@ -119,10 +119,10 @@ async def solo_game_play(message: Message, game_type: str, bet: int):
         finally:
             await conn.close()
     elif bot_adjusted > player_adjusted:
-        await message.answer(f"❌ **Бот выиграл!** -{bet} монет")
+        await message.answer(f"❌ <b>Бот выиграл!</b> -{bet} монет")
     else:
         await update_bot_balance(message.from_user.id, bet, "solo_tie")
-        await message.answer(f"🎭 **Ничья!** Ставка возвращена.")
+        await message.answer(f"🎭 <b>Ничья!</b> Ставка возвращена.")
 
 
 @router.callback_query(F.data.startswith("casino_solo_pick_"))

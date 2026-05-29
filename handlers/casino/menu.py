@@ -160,7 +160,7 @@ async def cb_casino_play_bot(call: CallbackQuery):
     if call.message.chat.type != "private":
         bot_username = (await get_bot().me()).username
         text = (
-            "🤖 **Игра с ботом** доступна **только в ЛС**!\n\n"
+            "🤖 <b>Игра с ботом</b> доступна <b>только в ЛС</b>!\n\n"
             "📌 Напишите боту в личку и отправьте:\n"
             "/сботом [игра] [ставка]\n\n"
             "Пример: `/сботом куб 50`\n\n"
@@ -169,7 +169,7 @@ async def cb_casino_play_bot(call: CallbackQuery):
         await call.message.edit_text(text)
         await call.answer()
         return
-    text = "🤖 **Игра с ботом**\n\n⬇️ <b>Выберите игру:</b>"
+    text = "🤖 <b>Игра с ботом</b>\n\n⬇️ <b>Выберите игру:</b>"
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=solo_game_selection_kb())
     await call.answer()
 
@@ -179,8 +179,8 @@ async def cb_casino_play_pvp(call: CallbackQuery):
     if call.message.chat.type == "private":
         bot_username = (await get_bot().me()).username
         text = (
-            "👥 **Игра с игроками** работает **только в групповых чатах**!\n\n"
-            "📌 **Как играть:**\n"
+            "👥 <b>Игра с игроками</b> работает <b>только в групповых чатах</b>!\n\n"
+            "📌 <b>Как играть:</b>\n"
             "1. Добавьте бота в группу: `@{}`\n"
             "2. Дайте боту права администратора\n"
             "3. Выберите игру и ставку ниже\n"
@@ -191,7 +191,7 @@ async def cb_casino_play_pvp(call: CallbackQuery):
         await call.answer()
         return
 
-    text = "👥 **Игра с игроками**\n\n⬇️ <b>Выберите игру:</b>"
+    text = "👥 <b>Игра с игроками</b>\n\n⬇️ <b>Выберите игру:</b>"
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=pvp_game_selection_kb())
     await call.answer()
 
@@ -201,8 +201,8 @@ async def cb_casino_blackjack_info(call: CallbackQuery):
     if call.message.chat.type == "private":
         bot_username = (await get_bot().me()).username
         text = (
-            "🃏 **Блэкджек** доступен **только в групповых чатах**!\n\n"
-            "📌 **Как играть:**\n"
+            "🃏 <b>Блэкджек</b> доступен <b>только в групповых чатах</b>!\n\n"
+            "📌 <b>Как играть:</b>\n"
             "1. Добавьте бота в группу: `@{}`\n"
             "2. Напишите в группе: `/блекджек 50`\n"
             "3. Игроки нажимают «Присоединиться»\n"
@@ -213,7 +213,7 @@ async def cb_casino_blackjack_info(call: CallbackQuery):
         await call.message.edit_text(text)
     else:
         text = (
-            "🃏 **Блэкджек**\n\n⬇️ <b>Выберите ставку:</b>"
+            "🃏 <b>Блэкджек</b>\n\n⬇️ <b>Выберите ставку:</b>"
         )
         await call.message.edit_text(text, parse_mode="HTML", reply_markup=blackjack_bet_kb())
     await call.answer()
