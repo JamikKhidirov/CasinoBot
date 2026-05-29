@@ -2,6 +2,7 @@ import asyncio
 import logging
 import sys
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.types import BotCommand
 from aiogram.exceptions import TelegramNetworkError
 import config
@@ -86,7 +87,7 @@ async def main():
         logger.error(f"Ошибка инициализации БД: {e}")
         return
 
-    bot = Bot(token=config.BOT_TOKEN, parse_mode="HTML")
+    bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     casino_setup(bot)
     dp = Dispatcher()
 
