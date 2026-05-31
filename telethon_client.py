@@ -1,10 +1,36 @@
 import asyncio
 import logging
+import sqlite3
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError
+from telethon.sessions import SQLiteSession
 from config import TELETHON_API_ID, TELETHON_API_HASH
 
 logger = logging.getLogger(__name__)
+
+
+class _WALSession(SQLiteSession):
+    """SQLite session with WAL mode to prevent 'database is locked'."""
+    def __init__(self, session_id=None):
+        self.save_entities = False
+        super().__init__(session_id)
+
+    def _cursor(self):
+        if self._conn is None:
+            self._conn = sqlite3.connect(
+                self.filename, check_same_thread=False, timeout=10,
+            )
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA busy_timeout=5000")
+        return self._conn.cursor()
+
+
+def _make_client() -> TelegramClient:
+    return TelegramClient(
+        _WALSession("telethon_session"),
+        TELETHON_API_ID, TELETHON_API_HASH,
+        system_version="4.16.30-vxCUSTOM",
+    )
 
 _client: TelegramClient | None = None
 _auth_state: dict = {}  # user_id -> {"phone": str, "phone_code_hash": str, "client": TelegramClient}
@@ -28,8 +54,7 @@ async def get_telethon_client() -> TelegramClient:
             "3. Укажите их в config.py"
         )
 
-    _client = TelegramClient("telethon_session", TELETHON_API_ID, TELETHON_API_HASH,
-                             system_version="4.16.30-vxCUSTOM")
+    _client = _make_client()
     await _client.connect()
 
     if await _client.is_user_authorized():
@@ -49,8 +74,7 @@ async def try_init_client() -> tuple[bool, str]:
     try:
         if not TELETHON_API_ID or not TELETHON_API_HASH:
             return False, "API_ID/API_HASH не заданы в config.py"
-        _client = TelegramClient("telethon_session", TELETHON_API_ID, TELETHON_API_HASH,
-                                 system_version="4.16.30-vxCUSTOM")
+        _client = _make_client()
         await _client.connect()
         if await _client.is_user_authorized():
             me = await _client.get_me()
@@ -75,8 +99,7 @@ async def start_login(phone: str) -> dict:
     """Отправляет код подтверждения на номер телефона."""
     global _client
     if _client is None:
-        _client = TelegramClient("telethon_session", TELETHON_API_ID, TELETHON_API_HASH,
-                                 system_version="4.16.30-vxCUSTOM")
+        _client = _make_client()
         await _client.connect()
 
     try:
