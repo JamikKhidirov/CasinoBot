@@ -1282,6 +1282,30 @@ async def cmd_setup_tg(message: Message, command: CommandObject):
     _tg_login_state[uid] = {}
 
 
+@router.message(F.text.func(lambda t: t.startswith("+") and t[1:].isdigit() or t.isdigit() and len(t) >= 10))
+async def tg_login_phone(message: Message):
+    uid = message.from_user.id
+    if uid not in _tg_login_state or not is_dev(uid):
+        return
+    if _tg_login_state[uid].get("phone"):
+        return
+    phone = message.text.strip()
+    if not phone.startswith("+"):
+        phone = "+" + phone
+    from telethon_client import start_login
+    res = await start_login(phone)
+    if not res.get("success"):
+        await message.answer(f"❌ Ошибка отправки кода: {res.get('error', '?')}")
+        return
+    _tg_login_state[uid]["phone"] = phone
+    _tg_login_state[uid]["phone_code_hash"] = res["phone_code_hash"]
+    timeout = res.get("timeout", 30)
+    await message.answer(
+        f"📱 Код отправлен на {phone}\n\n"
+        f"Введите код подтверждения из Telegram ({timeout} сек):"
+    )
+
+
 @router.message(F.text.regexp(r'^\d{3,6}$'))
 async def tg_login_code(message: Message):
     uid = message.from_user.id
