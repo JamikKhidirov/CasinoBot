@@ -1247,10 +1247,22 @@ _tg_login_state: dict[int, dict] = {}  # uid -> {"phone": str, "phone_code_hash"
 
 
 @router.message(Command("setup_tg"))
-async def cmd_setup_tg(message: Message):
+async def cmd_setup_tg(message: Message, command: CommandObject):
+    """Handle /setup_tg — with args = 2FA password, without = start phone login."""
     uid = message.from_user.id
     if not is_dev(uid):
         await message.answer("❌ Только разработчик")
+        return
+
+    # If user already has a phone state and provided args, treat as 2FA password
+    if command.args and uid in _tg_login_state:
+        from telethon_client import complete_2fa
+        res = await complete_2fa(command.args)
+        if res.get("success"):
+            await message.answer(f"✅ Telethon авторизован! {res['user']}")
+            del _tg_login_state[uid]
+        else:
+            await message.answer(f"❌ {res.get('error', 'Ошибка')}")
         return
 
     from telethon_client import try_init_client
@@ -1266,43 +1278,6 @@ async def cmd_setup_tg(message: Message):
         parse_mode="HTML"
     )
     _tg_login_state[uid] = {}
-
-
-@router.message(F.text.regexp(r'^\+?\d{10,15}$'))
-async def tg_login_phone(message: Message):
-    uid = message.from_user.id
-    if uid not in _tg_login_state or not is_dev(uid):
-        return
-
-    phone = message.text.strip()
-    from telethon_client import start_login
-    sent = await start_login(phone)
-    if not sent.get("success"):
-        await message.answer(f"❌ {sent.get('error', 'Ошибка')}")
-        return
-
-    _tg_login_state[uid] = {"phone": phone, "phone_code_hash": sent["phone_code_hash"]}
-    timeout = sent.get("timeout", 30)
-    await message.answer(
-        f"📱 Код отправлен на {phone}\n"
-        f"Введите код из Telegram (ждёт {timeout} сек):\n\n"
-        f"💡 Если включена 2FA — после кода введите пароль через /setup_tg <пароль>",
-        parse_mode="HTML"
-    )
-
-
-@router.message(Command("setup_tg", F.args))
-async def tg_login_password(message: Message, command: CommandObject):
-    uid = message.from_user.id
-    if uid not in _tg_login_state or not is_dev(uid):
-        return
-    from telethon_client import complete_2fa
-    res = await complete_2fa(command.args)
-    if res.get("success"):
-        await message.answer(f"✅ Telethon авторизован! {res['user']}")
-        del _tg_login_state[uid]
-    else:
-        await message.answer(f"❌ {res.get('error', 'Ошибка')}")
 
 
 @router.message(F.text.regexp(r'^\d{3,6}$'))
