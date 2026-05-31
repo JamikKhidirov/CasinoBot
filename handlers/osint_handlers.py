@@ -14,7 +14,9 @@ from osint import (phone_lookup, email_lookup, username_lookup, ip_lookup,
                    ssl_analyze, securitytrails_domain, virustotal_lookup,
                    hunter_email, tech_detect, enhanced_port_scan,
                      phone_full_enrich, username_phone_search, username_messages_search,
-                     phone_scan, card_lookup, phone_card_search, wifi_analyze)
+                     phone_scan, card_lookup, phone_card_search, wifi_analyze,
+                     telegram_account_lookup, instagram_profile_lookup,
+                     tiktok_profile_lookup, twitter_profile_lookup, youtube_channel_lookup)
 from leak import leak_search
 
 router = Router()
@@ -822,6 +824,245 @@ def _fmt_tech(data: dict) -> str:
     return "\n".join(parts)
 
 
+def _fmt_tg_account(data: dict) -> str:
+    if data.get("error"):
+        return f"❌ {data['error']}"
+    if not data.get("found"):
+        return f"❌ Аккаунт не найден"
+    lines = [f"<b>✈️ Telegram аккаунт — полный отчёт</b>"]
+    if data.get("type") == "phone":
+        lines.append(f"┃ 📱 Введён номер: <code>{data['input']}</code>")
+    else:
+        lines.append(f"┃ 🔗 Введён username: @{data['input']}")
+    lines.append(f"┃ ═══════════════════════════")
+
+    # ===== БАЗОВАЯ ИНФОРМАЦИЯ =====
+    if data.get("username"):
+        lines.append(f"┃ 🔗 Username: <b>@{data['username']}</b>")
+    if data.get("first_name") or data.get("last_name"):
+        lines.append(f"┃ 👤 Имя: <b>{data.get('first_name', '')} {data.get('last_name', '')}</b>".strip())
+    if data.get("phone"):
+        lines.append(f"┃ 📱 Телефон: <code>{data['phone']}</code>")
+    else:
+        lines.append(f"┃ 📱 Телефон: 🔒 скрыт")
+    lines.append(f"┃ 🆔 ID: <code>{data['user_id']}</code>")
+
+    tags = []
+    if data.get("bot"): tags.append("🤖 Бот")
+    if data.get("premium"): tags.append("⭐ Premium")
+    if data.get("verified"): tags.append("✅ Вериф")
+    if data.get("scam"): tags.append("⚠️ Scam")
+    if data.get("fake"): tags.append("⚠️ Fake")
+    if data.get("restricted"): tags.append("🔒 Ограничен")
+    if tags:
+        lines.append(f"┃ {' · '.join(tags)}")
+
+    if data.get("has_profile_photo"):
+        lines.append(f"┃ 📸 Фото: ✅ есть")
+    if data.get("status"):
+        s = data["status"].replace("UserStatus", "").replace("Recently", "🟡 недавно").replace("Online", "🟢 Онлайн").replace("Offline", "🔴 Офлайн").replace("LastWeek", "⚪ на неделе").replace("LastMonth", "⚪ в месяце").replace("LongTimeAgo", "⚪ давно")
+        lines.append(f"┃ 📊 Статус: {s}")
+    if data.get("bio"):
+        lines.append(f"┃ 📝 Био: {data['bio'][:200]}")
+
+    # ===== ОБЩИЕ ГРУППЫ =====
+    common_chats = data.get("common_chats", [])
+    admin_channels = data.get("admin_channels", [])
+    if data.get("common_chats_count") is not None and data["common_chats_count"] > 0:
+        lines.append(f"┃ 👥 Совместных групп: <b>{data['common_chats_count']}</b>")
+    if common_chats:
+        lines.append(f"┃ ═══════════════════════════")
+        lines.append(f"┃ <b>📋 Общие каналы/группы ({len(common_chats)}):</b>")
+        for chat in common_chats[:15]:
+            title = chat.get("title", "")
+            username = chat.get("username", "")
+            participants = chat.get("participants", 0)
+            ctype = chat.get("type", "")
+            line = f"┃  {'📢' if ctype == 'channel' else '💬'} {title}"
+            if username:
+                line += f" <a href='https://t.me/{username}'>@{username}</a>"
+            if participants:
+                line += f" | 👥 {participants:,}"
+            lines.append(line)
+    if admin_channels:
+        lines.append(f"┃ <b>👑 Каналы где админ ({len(admin_channels)}):</b>")
+        for ch in admin_channels[:5]:
+            title = ch.get("title", "")
+            username = ch.get("username", "")
+            line = f"┃  👑 {title}"
+            if username:
+                line += f" <a href='https://t.me/{username}'>@{username}</a>"
+            lines.append(line)
+
+    # ===== СООБЩЕНИЯ =====
+    public_msgs = data.get("public_messages", [])
+    if public_msgs:
+        voice_count = sum(1 for m in public_msgs if m.get("has_voice"))
+        lines.append(f"┃ ═══════════════════════════")
+        lines.append(f"┃ <b>📰 Найдено сообщений: {len(public_msgs)}</b>")
+        if voice_count:
+            lines.append(f"┃ 🎤 Из них голосовых: {voice_count}")
+        for i, msg in enumerate(public_msgs[:15], 1):
+            chat = msg.get("chat", "?")
+            link = msg.get("link", "")
+            date = msg.get("date", "")[:10] if msg.get("date") else ""
+            mt = msg.get("media_type", "text")
+            voice_dur = msg.get("voice_duration", 0)
+
+            # Иконка типа
+            icons = {"text": "💬", "photo": "📸", "voice": "🎤", "video": "🎬", "audio": "🎵", "document": "📄", "link": "🔗", "media": "📎"}
+            icon = icons.get(mt, "💬")
+
+            lines.append(f"┃  {i}. {icon} [{chat}] {date}")
+            if mt == "voice" and voice_dur:
+                mins, secs = divmod(voice_dur, 60)
+                lines.append(f"┃    🎤 Голосовое {mins}:{secs:02d}")
+            elif mt == "photo":
+                lines.append(f"┃    📸 Фото")
+            elif mt == "video":
+                lines.append(f"┃    🎬 Видео")
+            txt = msg.get("text", "")
+            if txt:
+                lines.append(f"┃    {txt[:110]}")
+            if link:
+                lines.append(f"┃    <a href='{link}'>🔗 открыть сообщение</a>")
+
+    # ===== ФУТЕР =====
+    lines.append(f"┃ ═══════════════════════════")
+    if data.get("found_by") == "phone_to_username":
+        lines.append(f"┃ 🔄 Найден по номеру → username")
+    elif data.get("found_by") == "username_to_phone":
+        lines.append(f"┃ 🔄 Найден по username → номер")
+    if not public_msgs and not common_chats:
+        lines.append(f"┃ ℹ️ Нет публичных сообщений и общих групп")
+        lines.append(f"┃    (пользователь скрыт или данных нет)")
+
+    return "\n".join(lines)
+
+
+def _fmt_instagram(data: dict) -> str:
+    if data.get("error"):
+        return f"❌ {data['error']}"
+    if not data.get("found"):
+        return f"❌ Профиль Instagram не найден"
+    lines = [
+        f"<b>📸 Instagram профиль</b>",
+        f"┃ Username: @{data['input']}",
+    ]
+    if data.get("full_name"):
+        lines.append(f"┃ 👤 Имя: <b>{data['full_name']}</b>")
+    if data.get("biography"):
+        bio = data["biography"][:300]
+        lines.append(f"┃ 📝 Био: {bio}")
+    lines.append(f"┃ ━━━━━━━━━━━━━━━━━━━")
+    lines.append(f"┃ 👥 Подписчики: <b>{data.get('follower_count', 0):,}</b>")
+    lines.append(f"┃ 👣 Подписки: <b>{data.get('following_count', 0):,}</b>")
+    lines.append(f"┃ 📸 Публикации: <b>{data.get('media_count', 0):,}</b>")
+    tags = []
+    if data.get("is_private"): tags.append("🔒 Приватный")
+    if data.get("is_verified"): tags.append("✅ Верифицирован")
+    if data.get("is_business"): tags.append("💼 Бизнес")
+    if tags:
+        lines.append(f"┃ {' | '.join(tags)}")
+    if data.get("business_category"):
+        lines.append(f"┃ 🏢 Категория: {data['business_category']}")
+    if data.get("external_url"):
+        lines.append(f"┃ 🔗 Ссылка: <code>{data['external_url']}</code>")
+    return "\n".join(lines)
+
+
+def _fmt_tiktok(data: dict) -> str:
+    if data.get("error"):
+        return f"❌ {data['error']}"
+    if not data.get("found"):
+        return f"❌ Профиль TikTok не найден"
+    lines = [
+        f"<b>🎵 TikTok профиль</b>",
+        f"┃ Username: @{data['input']}",
+    ]
+    if data.get("nickname"):
+        lines.append(f"┃ 👤 Никнейм: <b>{data['nickname']}</b>")
+    if data.get("bio"):
+        lines.append(f"┃ 📝 Описание: {data['bio'][:300]}")
+    lines.append(f"┃ ━━━━━━━━━━━━━━━━━━━")
+    if data.get("followerCount") is not None:
+        lines.append(f"┃ 👥 Подписчики: <b>{data['followerCount']:,}</b>")
+    if data.get("followingCount") is not None:
+        lines.append(f"┃ 👣 Подписки: <b>{data['followingCount']:,}</b>")
+    if data.get("videoCount") is not None:
+        lines.append(f"┃ 🎬 Видео: <b>{data['videoCount']:,}</b>")
+    if data.get("heartCount") is not None:
+        lines.append(f"┃ ❤️ Лайки: <b>{data['heartCount']:,}</b>")
+    tags = []
+    if data.get("verified"): tags.append("✅ Верифицирован")
+    if data.get("privateAccount"): tags.append("🔒 Приватный")
+    if tags:
+        lines.append(f"┃ {' | '.join(tags)}")
+    return "\n".join(lines)
+
+
+def _fmt_twitter(data: dict) -> str:
+    if data.get("error"):
+        return f"❌ {data['error']}"
+    if not data.get("found"):
+        return f"❌ Профиль Twitter/X не найден"
+    lines = [
+        f"<b>🐦 Twitter/X профиль</b>",
+        f"┃ Username: @{data['input']}",
+    ]
+    if data.get("display_name"):
+        lines.append(f"┃ 👤 Имя: <b>{data['display_name']}</b>")
+    if data.get("bio"):
+        bio = data["bio"][:300]
+        lines.append(f"┃ 📝 Био: {bio}")
+    lines.append(f"┃ ━━━━━━━━━━━━━━━━━━━")
+    if data.get("followers") is not None:
+        lines.append(f"┃ 👥 Подписчики: <b>{data['followers']:,}</b>")
+    if data.get("following") is not None:
+        lines.append(f"┃ 👣 Подписки: <b>{data['following']:,}</b>")
+    if data.get("tweets") is not None:
+        lines.append(f"┃ 📰 Твиты: <b>{data['tweets']:,}</b>")
+    if data.get("joined"):
+        lines.append(f"┃ 📅 Присоединился: {data['joined']}")
+    if data.get("location"):
+        lines.append(f"┃ 📍 Локация: {data['location']}")
+    if data.get("verified"):
+        lines.append(f"┃ ✅ Верифицирован")
+    return "\n".join(lines)
+
+
+def _fmt_youtube(data: dict) -> str:
+    if data.get("error"):
+        return f"❌ {data['error']}"
+    if not data.get("found"):
+        return f"❌ Канал YouTube не найден"
+    lines = [
+        f"<b>▶️ YouTube канал</b>",
+        f"┃ Handle: @{data['input']}",
+    ]
+    if data.get("title"):
+        lines.append(f"┃ 📺 Название: <b>{data['title']}</b>")
+    if data.get("description"):
+        desc = data["description"][:300]
+        lines.append(f"┃ 📝 Описание: {desc}")
+    lines.append(f"┃ ━━━━━━━━━━━━━━━━━━━")
+    if data.get("subscribers") is not None:
+        lines.append(f"┃ 👥 Подписчики: <b>{data['subscribers']:,}</b>")
+    if data.get("videos") is not None:
+        lines.append(f"┃ 🎬 Видео: <b>{data['videos']:,}</b>")
+    if data.get("views") is not None:
+        lines.append(f"┃ 👁 Просмотры: <b>{data['views']:,}</b>")
+    if data.get("joined"):
+        lines.append(f"┃ 📅 Создан: {data['joined']}")
+    if data.get("country"):
+        lines.append(f"┃ 🌍 Страна: {data['country']}")
+    if data.get("verified"):
+        lines.append(f"┃ ✅ Верифицирован")
+    if data.get("channel_id"):
+        lines.append(f"┃ 🆔 Channel ID: <code>{data['channel_id']}</code>")
+    return "\n".join(lines)
+
+
 async def _execute_lookup(message: Message, mode: str, query: str):
     """Выполняет OSINT-поиск и отправляет результат."""
     uid = message.from_user.id
@@ -934,6 +1175,26 @@ async def _execute_lookup(message: Message, mode: str, query: str):
             result = await wifi_analyze(query)
             log_osint_query(uid, "wifi", query)
             formatted = _fmt_wifi(result)
+        elif mode == "tg":
+            result = await telegram_account_lookup(query)
+            log_osint_query(uid, "tg", query)
+            formatted = _fmt_tg_account(result)
+        elif mode == "instagram":
+            result = await instagram_profile_lookup(query)
+            log_osint_query(uid, "instagram", query)
+            formatted = _fmt_instagram(result)
+        elif mode == "tiktok":
+            result = await tiktok_profile_lookup(query)
+            log_osint_query(uid, "tiktok", query)
+            formatted = _fmt_tiktok(result)
+        elif mode == "twitter":
+            result = await twitter_profile_lookup(query)
+            log_osint_query(uid, "twitter", query)
+            formatted = _fmt_twitter(result)
+        elif mode == "youtube":
+            result = await youtube_channel_lookup(query)
+            log_osint_query(uid, "youtube", query)
+            formatted = _fmt_youtube(result)
         else:
             formatted = "❌ Неизвестный тип поиска"
     except Exception as e:
@@ -980,6 +1241,16 @@ router.message.register(_cmd_shortcut("wifi", "📶 <b>Анализ Wi-Fi</b>\n\
     "💡 Где взять BSSID: настройки роутера → статус, "
     "или приложение WiFi Analyzer (Google Play)", "AA:BB:CC:11:22:33"), Command("wifi"))
 
+router.message.register(_cmd_shortcut("tg", "✈️ Введите username или номер телефона Telegram\n"
+    "Username: @ivanov\n"
+    "Номер: +79991234567\n\n"
+    "🔁 username → номер телефона\n"
+    "🔁 номер телефона → username", "@username или +79991234567"), Command("tg"))
+router.message.register(_cmd_shortcut("instagram", "📸 Введите username Instagram\nПример: @username", "username"), Command("instagram"))
+router.message.register(_cmd_shortcut("tiktok", "🎵 Введите username TikTok\nПример: @username", "username"), Command("tiktok"))
+router.message.register(_cmd_shortcut("twitter", "🐦 Введите username Twitter/X\nПример: @username", "username"), Command("twitter"))
+router.message.register(_cmd_shortcut("youtube", "▶️ Введите handle YouTube-канала\nПример: @channel", "@channel"), Command("youtube"))
+
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
@@ -998,6 +1269,11 @@ async def cmd_help(message: Message):
             "┃ <code>/ip</code> — геолокация IP\n"
             "┃ <code>/domain</code> — инфо по домену\n"
             "┃ <code>/wifi</code> — анализ Wi-Fi (BSSID/SSID/IP)\n"
+            "┃ <code>/tg</code> — Telegram аккаунт (username↔номер)\n"
+            "┃ <code>/instagram</code> — Instagram профиль\n"
+            "┃ <code>/tiktok</code> — TikTok профиль\n"
+            "┃ <code>/twitter</code> — Twitter/X профиль\n"
+            "┃ <code>/youtube</code> — YouTube канал\n"
         )
     parts.append(
         "<b>🎲 Анонимный чат</b>\n"
@@ -1049,8 +1325,16 @@ async def osint_callback(call: CallbackQuery):
         if uid != OWNER_ID:
             await call.answer("❌ OSINT доступен только администраторам.", show_alert=True)
             return
-        await call.message.edit_text("<b>🔍 OSINT-пробив</b>\nВыберите тип данных:", parse_mode="HTML",
-                                     reply_markup=osint_menu_kb())
+        await call.message.edit_text(
+            "<b>🔍 OSINT-пробив</b>\n"
+            "┃━━━━━━━━━━━━━━━━━━━━\n"
+            "┃ <b>👤 Люди</b> — телефон, email, username, карты\n"
+            "┃ <b>🌐 Соцсети</b> — TG, Instagram, TikTok, Twitter, YouTube\n"
+            "┃ <b>🌍 Сеть</b> — IP, домен, порты, SSL, Wi-Fi\n"
+            "┃━━━━━━━━━━━━━━━━━━━━\n"
+            "┃ Выберите категорию ниже 👇",
+            parse_mode="HTML", reply_markup=osint_menu_kb()
+        )
         return
 
     prompts = {
@@ -1070,6 +1354,12 @@ async def osint_callback(call: CallbackQuery):
                        "┃ • <b>SSID</b> — имя Wi-Fi сети\n"
                        "┃ • <b>IP</b> — внешний IP (геолокация, провайдер)\n\n"
                        "💡 BSSID можно узнать в настройках роутера или WiFi Analyzer", "wifi"),
+        "osint_tg": ("✈️ Введите username (@ivanov) или номер телефона (+79991234567)\n\n"
+                     "🔁 username → номер\n🔁 номер → username", "tg"),
+        "osint_instagram": ("📸 Введите username Instagram\nПример: @username", "instagram"),
+        "osint_tiktok": ("🎵 Введите username TikTok\nПример: @username", "tiktok"),
+        "osint_twitter": ("🐦 Введите username Twitter/X\nПример: @username", "twitter"),
+        "osint_youtube": ("▶️ Введите handle YouTube-канала\nПример: @channel", "youtube"),
     }
 
     if data in prompts:
@@ -1079,6 +1369,16 @@ async def osint_callback(call: CallbackQuery):
         msg, mode = prompts[data]
         await call.message.edit_text(msg, parse_mode="HTML")
         osint_waiting[uid] = (mode, call.message.chat.id, call.message.message_id)
+        return
+
+    # Заголовки разделов — просто уведомление
+    if data.endswith("_header"):
+        labels = {
+            "osint_people_header": "👤 Поиск людей: телефон, email, username, карта",
+            "osint_social_header": "🌐 Социальные сети: TG, Instagram, TikTok, Twitter, YouTube",
+            "osint_net_header": "🌍 Сетевые утилиты: IP, домен, порты, SSL, Wi-Fi",
+        }
+        await call.answer(labels.get(data, "⚡"), show_alert=False)
         return
 
     await call.answer()
@@ -1201,6 +1501,26 @@ async def osint_text_handler(message: Message):
             result = await wifi_analyze(text)
             log_osint_query(uid, "wifi", text)
             formatted = _fmt_wifi(result)
+        elif mode == "tg":
+            result = await telegram_account_lookup(text)
+            log_osint_query(uid, "tg", text)
+            formatted = _fmt_tg_account(result)
+        elif mode == "instagram":
+            result = await instagram_profile_lookup(text)
+            log_osint_query(uid, "instagram", text)
+            formatted = _fmt_instagram(result)
+        elif mode == "tiktok":
+            result = await tiktok_profile_lookup(text)
+            log_osint_query(uid, "tiktok", text)
+            formatted = _fmt_tiktok(result)
+        elif mode == "twitter":
+            result = await twitter_profile_lookup(text)
+            log_osint_query(uid, "twitter", text)
+            formatted = _fmt_twitter(result)
+        elif mode == "youtube":
+            result = await youtube_channel_lookup(text)
+            log_osint_query(uid, "youtube", text)
+            formatted = _fmt_youtube(result)
         else:
             formatted = "❌ Неизвестный тип поиска"
     except Exception as e:

@@ -64,11 +64,13 @@ async def cmd_solo_bot(message: Message):
     await solo_game_play(message, game_type, bet)
 
 
-async def solo_game_play(message: Message, game_type: str, bet: int):
-    user = await get_user(message.from_user.id)
+async def solo_game_play(message: Message, game_type: str, bet: int, user_id: int = None):
+    uid = user_id or message.from_user.id
+    user = await get_user(uid)
     if not user:
-        await create_user(message.from_user)
-        user = await get_user(message.from_user.id)
+        from aiogram.types import User
+        await create_user(User(id=uid, first_name="Player", is_bot=False, username=f"user_{uid}"))
+        user = await get_user(uid)
 
     bal = user["bot_balance"]
     if bal is None:
@@ -77,10 +79,10 @@ async def solo_game_play(message: Message, game_type: str, bet: int):
         await message.reply(f"❌ Недостаточно средств! Баланс: {bal} монет для игры с ботом")
         return
 
-    await update_bot_balance(message.from_user.id, -bet, "solo_reserve")
+    await update_bot_balance(uid, -bet, "solo_reserve")
 
     config = GAMES_CONFIG[game_type]
-    player_tag = await get_username(message.from_user.id)
+    player_tag = await get_username(uid)
 
     msg = await message.reply(
         f"🤖 <b>Игра с ботом</b> {config['emoji']}\n"
@@ -125,7 +127,7 @@ async def solo_game_play(message: Message, game_type: str, bet: int):
     )
 
     await asyncio.sleep(1)
-    new_user = await get_user(message.from_user.id)
+    new_user = await get_user(uid)
     new_bal = new_user["bot_balance"] if new_user else bal
 
     def is_player_win() -> str:
@@ -143,59 +145,88 @@ async def solo_game_play(message: Message, game_type: str, bet: int):
     result = is_player_win()
     if result == "win":
         prize = bet * 2
-        await update_bot_balance(message.from_user.id, prize, "solo_win")
+        await update_bot_balance(uid, prize, "solo_win")
         await message.answer(
             f"🏆 <b>Вы выиграли!</b> +{prize} монет\n"
-            f"💰 Ваш счёт: {new_bal + prize} монет"
+            f"💰 Ваш счёт: {new_bal + prize} монет",
+            reply_markup=_after_game_kb(game_type),
         )
         conn = await get_db()
         try:
             await conn.execute(
                 "INSERT INTO solo_scores (user_id, username, score, games_played) VALUES (?, ?, ?, 1) "
                 "ON CONFLICT(user_id) DO UPDATE SET score = score + ?, games_played = games_played + 1",
-                (message.from_user.id, message.from_user.username or f"user_{message.from_user.id}", prize, prize),
+                (uid, player_tag, prize, prize),
             )
             await conn.commit()
         except Exception:
             pass
     elif result == "lose":
-        await update_bot_balance(message.from_user.id, 0, "solo_lose")
+        await update_bot_balance(uid, 0, "solo_lose")
         await message.answer(
             f"❌ <b>Бот выиграл!</b> -{bet} монет\n"
-            f"💰 Ваш счёт: {new_bal} монет"
+            f"💰 Ваш счёт: {new_bal} монет",
+            reply_markup=_after_game_kb(game_type),
         )
         conn = await get_db()
         try:
             await conn.execute(
                 "INSERT INTO solo_scores (user_id, username, score, games_played) VALUES (?, ?, 0, 1) "
                 "ON CONFLICT(user_id) DO UPDATE SET games_played = games_played + 1",
-                (message.from_user.id, message.from_user.username or f"user_{message.from_user.id}"),
+                (uid, player_tag),
             )
             await conn.commit()
         except Exception:
             pass
     else:
-        await update_bot_balance(message.from_user.id, bet, "solo_tie")
+        await update_bot_balance(uid, bet, "solo_tie")
         await message.answer(
             f"🎭 <b>Ничья!</b> Ставка возвращена.\n"
-            f"💰 Ваш счёт: {new_bal + bet} монет"
+            f"💰 Ваш счёт: {new_bal + bet} монет",
+            reply_markup=_after_game_kb(game_type),
         )
         conn = await get_db()
         try:
             await conn.execute(
                 "INSERT INTO solo_scores (user_id, username, score, games_played) VALUES (?, ?, ?, 1) "
                 "ON CONFLICT(user_id) DO UPDATE SET score = score + ?, games_played = games_played + 1",
-                (message.from_user.id, message.from_user.username or f"user_{message.from_user.id}", bet, bet),
+                (uid, player_tag, bet, bet),
             )
             await conn.commit()
         except Exception:
             pass
+
+    # Cleanup: delete dice animation messages
+    try:
+        import asyncio
+        await asyncio.sleep(1)
+        cleanup_ids = []
+        if player_dice and hasattr(player_dice, 'message_id'):
+            cleanup_ids.append(player_dice.message_id)
+        if bot_dice_msg and hasattr(bot_dice_msg, 'message_id'):
+            cleanup_ids.append(bot_dice_msg.message_id)
+        for mid in cleanup_ids:
+            try:
+                await message.bot.delete_message(message.chat.id, mid)
+            except:
+                pass
+    except:
+        pass
 
     if conn:
         try:
             await conn.close()
         except Exception:
             pass
+
+
+def _after_game_kb(game_type: str):
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"🎮 Играть ещё {GAMES_CONFIG[game_type]['emoji']}", callback_data=f"casino_solo_pick_{game_type}"),
+         InlineKeyboardButton(text="🎲 Другие игры", callback_data="casino_play_bot")],
+        [InlineKeyboardButton(text="🏠 Казино", callback_data="casino_menu")],
+    ])
 
 
 @router.callback_query(F.data.startswith("casino_solo_pick_"))
@@ -250,7 +281,7 @@ async def cb_casino_solo_bet(call: CallbackQuery, state: FSMContext):
 
     await call.message.edit_text(f"🎲 <b>{GAMES_CONFIG[game_type]['emoji']} Игра с ботом</b>\nЗапускаем...")
     await call.answer()
-    await solo_game_play(call.message, game_type, bet)
+    await solo_game_play(call.message, game_type, bet, call.from_user.id)
 
 
 @router.message(SoloBetState.waiting_for_bet)

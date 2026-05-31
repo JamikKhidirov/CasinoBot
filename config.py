@@ -13,3 +13,8 @@ ABUSEIPDB_API_KEY = ""       # https://abuseipdb.com
 HUNTER_API_KEY = ""          # https://hunter.io
 IPINFO_API_KEY = ""          # https://ipinfo.io (бесплатно 50k/мес)
 BUILTWITH_API_KEY = ""       # https://builtwith.com
+
+# Telethon для Telegram MTProto (битва username ↔ номер телефона)
+# Получить: https://my.telegram.org/apps
+TELETHON_API_ID = 23414580
+TELETHON_API_HASH = "c3043d8e62fae95f0298de45e444dc8b"

@@ -1128,7 +1128,7 @@ async def username_messages_search(username: str) -> dict:
     result = {"messages": [], "sources": []}
 
     async def from_telegram():
-        """Telegram: посты канала/сообщения через tg.i-c-a.su."""
+        """Telegram: посты канала/сообщения через tg.i-c-a.su + tgsearch."""
         sources = [
             (f"https://tg.i-c-a.su/json/{username}", "tg.i-c-a.su"),
             (f"https://tg.i-c-a.su/_/json/{username}", "tg.i-c-a.su"),
@@ -1141,9 +1141,9 @@ async def username_messages_search(username: str) -> dict:
                         data = r.json()
                         posts = []
                         if isinstance(data, list):
-                            posts = data[:5]
+                            posts = data[:10]
                         elif isinstance(data, dict) and "messages" in data:
-                            posts = data["messages"][:5]
+                            posts = data["messages"][:10]
                         for p in posts:
                             if isinstance(p, dict):
                                 text = p.get("text", p.get("message", ""))
@@ -1160,6 +1160,27 @@ async def username_messages_search(username: str) -> dict:
                                         result["sources"].append(src)
             except:
                 pass
+        # Поиск по tg.i-c-a.su search
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                r = await c.get(
+                    f"https://tg.i-c-a.su/json/_search?q={username}&limit=5",
+                    headers={"User-Agent": USER_AGENT}
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    if isinstance(data, list):
+                        for item in data[:5]:
+                            text = str(item.get("text", item.get("message", "")))[:300]
+                            result["messages"].append({
+                                "source": "tg.i-c-a.su/search",
+                                "text": text,
+                                "context": f"поиск по username: {username}"
+                            })
+                            if "tg.i-c-a.su/search" not in result["sources"]:
+                                result["sources"].append("tg.i-c-a.su/search")
+        except:
+            pass
 
     async def from_vk_wall():
         """VK: посты со стены пользователя."""
@@ -1235,7 +1256,73 @@ async def username_messages_search(username: str) -> dict:
         except:
             pass
 
-    await asyncio.gather(from_telegram(), from_vk_wall(), from_reddit(), from_google())
+    async def from_instagram():
+        """Instagram: проверка username через публичный профиль."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                r = await c.get(
+                    f"https://www.instagram.com/{username}/",
+                    headers={"User-Agent": USER_AGENT}
+                )
+                if r.status_code == 200 and "page isn't available" not in r.text.lower()[:3000]:
+                    # Пробуем извлечь описание профиля
+                    desc_match = re.search(r'<meta[^>]*property="og:description"[^>]*content="([^"]+)"', r.text)
+                    if desc_match:
+                        desc = desc_match.group(1)
+                        result["messages"].append({
+                            "source": "Instagram",
+                            "text": f"Профиль: {desc[:500]}",
+                            "context": "описание профиля"
+                        })
+                        if "Instagram" not in result["sources"]:
+                            result["sources"].append("Instagram")
+        except:
+            pass
+
+    async def from_tiktok():
+        """TikTok: проверка профиля по username."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                r = await c.get(
+                    f"https://www.tiktok.com/@{username}",
+                    headers={"User-Agent": USER_AGENT}
+                )
+                if r.status_code == 200 and "Couldn't find this account" not in r.text:
+                    desc_match = re.search(r'<meta[^>]*name="description"[^>]*content="([^"]+)"', r.text)
+                    if desc_match:
+                        desc = desc_match.group(1)[:500]
+                        result["messages"].append({
+                            "source": "TikTok",
+                            "text": f"Профиль: {desc}",
+                        })
+                        if "TikTok" not in result["sources"]:
+                            result["sources"].append("TikTok")
+        except:
+            pass
+
+    async def from_twitter():
+        """Twitter/X: профиль пользователя."""
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+                r = await c.get(
+                    f"https://x.com/{username}",
+                    headers={"User-Agent": USER_AGENT}
+                )
+                if r.status_code == 200 and "This account doesn't exist" not in r.text:
+                    desc_match = re.search(r'<meta[^>]*name="description"[^>]*content="([^"]+)"', r.text)
+                    if desc_match:
+                        desc = desc_match.group(1)[:500]
+                        result["messages"].append({
+                            "source": "Twitter/X",
+                            "text": f"Профиль: {desc}",
+                        })
+                        if "Twitter/X" not in result["sources"]:
+                            result["sources"].append("Twitter/X")
+        except:
+            pass
+
+    await asyncio.gather(from_telegram(), from_vk_wall(), from_reddit(), from_google(),
+                         from_instagram(), from_tiktok(), from_twitter())
 
     result["found"] = len(result["messages"]) > 0
     return result
@@ -2601,3 +2688,472 @@ async def card_lookup(card_number: str) -> dict:
     except Exception as e:
         logger.warning(f"card_lookup error: {e}")
         return {"error": f"❌ Ошибка запроса: {e}"}
+
+
+# ==================== TELEGRAM ACCOUNT ANALYSIS (TELETHON) ====================
+
+PHONE_LIKE = re.compile(r'^\+?\d{7,15}$')
+
+
+async def telegram_account_lookup(input_str: str) -> dict:
+    """Telegram аккаунт: username↔номер + все группы + сообщения + медиа + ссылки."""
+    result = {"input": input_str, "found": False, "type": None, "error": None}
+
+    try:
+        from telethon_client import get_telethon_client
+        from telethon.errors import UsernameInvalidError, FloodWaitError
+        from telethon.tl.functions.users import GetFullUserRequest
+        from telethon.tl.functions.messages import GetCommonChatsRequest, SearchGlobalRequest
+        from telethon.tl.functions.channels import GetParticipantChannelsRequest
+        from telethon.tl.types import InputMessagesFilterEmpty, InputPeerEmpty, MessageMediaPhoto, MessageMediaDocument
+
+        client = await get_telethon_client()
+
+        text = input_str.strip()
+        if text.startswith("@"):
+            text = text[1:]
+
+        clean = text.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+        is_phone = bool(PHONE_LIKE.match(clean)) and len(clean) >= 10
+
+        try:
+            entity = await client.get_entity(clean if not is_phone else ("+" + clean if not clean.startswith("+") else clean))
+        except ValueError:
+            try:
+                entity = await client.get_entity(clean)
+            except Exception as e2:
+                result["error"] = f"Аккаунт не найден: {e2}"
+                return result
+        except UsernameInvalidError:
+            result["error"] = "Такой username не существует."
+            return result
+        except FloodWaitError as e:
+            result["error"] = f"⏳ Rate limit. Подождите {e.seconds} сек."
+            return result
+
+        result["found"] = True
+        result["type"] = "phone" if is_phone else "username"
+        result["user_id"] = entity.id
+        result["username"] = entity.username
+        result["first_name"] = entity.first_name or ""
+        result["last_name"] = entity.last_name or ""
+        result["phone"] = entity.phone
+        result["bot"] = entity.bot
+        result["premium"] = getattr(entity, "premium", False)
+        result["verified"] = getattr(entity, "verified", False)
+        result["scam"] = getattr(entity, "scam", False)
+        result["fake"] = getattr(entity, "fake", False)
+        result["restricted"] = getattr(entity, "restricted", False)
+
+        if hasattr(entity, "status") and entity.status:
+            result["status"] = str(entity.status)
+
+        if is_phone and entity.username:
+            result["found_by"] = "phone_to_username"
+        elif not is_phone and entity.phone:
+            result["found_by"] = "username_to_phone"
+        else:
+            result["found_by"] = "general"
+
+        # ==================== РАСШИРЕННЫЕ ДАННЫЕ ====================
+
+        def _make_msg_link(chat_entity, msg_id: int) -> str:
+            username = getattr(chat_entity, "username", None)
+            if username:
+                return f"https://t.me/{username}/{msg_id}"
+            cid = getattr(chat_entity, "id", 0)
+            if cid < 0:
+                cid = -cid
+            s = str(cid)
+            if s.startswith("100"):
+                s = s[3:]
+            return f"https://t.me/c/{s}/{msg_id}"
+
+        def _media_type(msg) -> str:
+            if not msg.media:
+                return "text"
+            if isinstance(msg.media, MessageMediaPhoto):
+                return "photo"
+            if isinstance(msg.media, MessageMediaDocument):
+                doc = msg.media.document
+                mime = getattr(doc, "mime_type", "") if doc else ""
+                if "video" in mime:
+                    return "video"
+                if any(x in mime for x in ("audio", "ogg")):
+                    return "audio"
+                if msg.media.voice or "ogg" in mime:
+                    return "voice"
+                return "document"
+            return "media"
+
+        async def get_full_user():
+            try:
+                full = await client(GetFullUserRequest(entity.id))
+                fu = full.full_user
+                result["bio"] = getattr(fu, "about", None) or ""
+                result["common_chats_count"] = getattr(fu, "common_chats_count", 0)
+                result["has_profile_photo"] = getattr(fu, "profile_photo", None) is not None
+                result["personal_photo"] = getattr(fu, "personal_photo", None) is not None
+                result["ttl_period"] = getattr(fu, "ttl_period", None)
+                if hasattr(fu, "bot_info") and fu.bot_info:
+                    result["bot_description"] = getattr(fu.bot_info, "description", "")
+            except Exception as e:
+                logger.debug(f"GetFullUserRequest: {e}")
+
+        async def get_common_chats():
+            """Все общие группы и каналы (до 100)."""
+            try:
+                common = await client(GetCommonChatsRequest(user_id=entity.id, max_id=0, limit=100))
+                chats = []
+                if hasattr(common, "chats"):
+                    for chat in common.chats:
+                        chats.append({
+                            "title": getattr(chat, "title", ""),
+                            "username": getattr(chat, "username", ""),
+                            "id": chat.id,
+                            "participants": getattr(chat, "participants_count", 0),
+                            "type": "channel" if hasattr(chat, "megagroup") and chat.megagroup is False else "group",
+                            "verified": getattr(chat, "verified", False),
+                            "scam": getattr(chat, "scam", False),
+                        })
+                if chats:
+                    result["common_chats"] = chats
+                    result["common_chats_found"] = len(chats)
+            except Exception as e:
+                logger.debug(f"GetCommonChats: {e}")
+
+        async def get_channels_admin():
+            """Каналы где пользователь админ (только если в контактах)."""
+            try:
+                channels = await client(GetParticipantChannelsRequest(entity.id))
+                chs = []
+                if hasattr(channels, "chats"):
+                    for ch in channels.chats:
+                        chs.append({
+                            "title": getattr(ch, "title", ""),
+                            "username": getattr(ch, "username", ""),
+                            "id": ch.id,
+                            "participants": getattr(ch, "participants_count", 0),
+                        })
+                if chs:
+                    result["admin_channels"] = chs
+                    result["admin_channels_found"] = len(chs)
+            except Exception as e:
+                logger.debug(f"GetParticipantChannels: {e}")
+
+        async def search_public_messages():
+            """Ищет сообщения с упоминанием пользователя (username/имя) в публичных чатах."""
+            queries = []
+            if entity.username:
+                queries.append(f"@{entity.username}")
+            if is_phone and len(clean) >= 7:
+                queries.append(clean)
+            if entity.first_name:
+                queries.append(entity.first_name)
+
+            all_msgs = []
+            seen_links = set()
+
+            for q in queries:
+                if not q or len(q) < 2:
+                    continue
+                try:
+                    search = await client(SearchGlobalRequest(
+                        q=q, filter=InputMessagesFilterEmpty(),
+                        min_date=None, max_date=None,
+                        offset_rate=0, offset_peer=InputPeerEmpty(),
+                        offset_id=0, limit=10,
+                    ))
+                    if hasattr(search, "messages") and search.messages:
+                        for msg in search.messages:
+                            try:
+                                chat_entity = await client.get_entity(msg.peer_id)
+                            except:
+                                continue
+                            link = _make_msg_link(chat_entity, msg.id)
+                            if link in seen_links:
+                                continue
+                            seen_links.add(link)
+
+                            chat_title = getattr(chat_entity, "title", "") or getattr(chat_entity, "username", "") or str(chat_entity.id)
+                            chat_username = getattr(chat_entity, "username", "")
+                            mt = _media_type(msg)
+                            text = (msg.text or "")[:300]
+
+                            entry = {
+                                "chat": chat_title,
+                                "chat_username": chat_username,
+                                "text": text,
+                                "link": link,
+                                "media_type": mt,
+                                "has_voice": mt == "voice",
+                                "date": str(getattr(msg, "date", ""))[:19],
+                                "msg_id": msg.id,
+                            }
+
+                            if mt == "voice" and msg.media and hasattr(msg.media, "voice") and msg.media.voice:
+                                entry["voice_duration"] = getattr(msg.media.voice, "duration", 0)
+                                entry["voice_id"] = msg.media.voice.id
+
+                            all_msgs.append(entry)
+                except Exception as e:
+                    logger.debug(f"SearchGlobal(q={q}): {e}")
+
+            all_msgs.sort(key=lambda x: x.get("date", ""), reverse=True)
+            if all_msgs:
+                result["public_messages"] = all_msgs[:20]
+
+        await asyncio.gather(get_full_user(), get_common_chats(), get_channels_admin(), search_public_messages())
+
+    except RuntimeError as e:
+        result["error"] = str(e)
+    except Exception as e:
+        result["error"] = f"Ошибка Telethon: {type(e).__name__}: {e}"
+        logger.warning(f"telegram_account_lookup: {e}")
+
+    return result
+
+
+# ==================== INSTAGRAM PROFILE LOOKUP ====================
+
+async def instagram_profile_lookup(username: str) -> dict:
+    """Instagram — детальный профиль по username через публичный API."""
+    username = username.strip().lstrip("@")
+    result = {"input": username, "found": False, "error": None}
+
+    try:
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True) as c:
+            # Пробуем через публичный Instagram API (без авторизации)
+            headers = {
+                "User-Agent": USER_AGENT,
+                "Accept": "application/json, text/plain, */*",
+                "X-IG-App-ID": "936619743392459",
+                "X-Requested-With": "XMLHttpRequest",
+            }
+            r = await c.get(f"https://i.instagram.com/api/v1/users/web_profile_info/?username={username}",
+                            headers=headers)
+
+            if r.status_code == 200:
+                data = r.json()
+                user = data.get("data", {}).get("user", {})
+                if user:
+                    result["found"] = True
+                    result["full_name"] = user.get("full_name", "")
+                    result["biography"] = user.get("biography", "")
+                    result["follower_count"] = user.get("edge_followed_by", {}).get("count", 0)
+                    result["following_count"] = user.get("edge_follow", {}).get("count", 0)
+                    result["media_count"] = user.get("edge_owner_to_timeline_media", {}).get("count", 0)
+                    result["profile_pic"] = user.get("profile_pic_url_hd", "")
+                    result["is_private"] = user.get("is_private", False)
+                    result["is_verified"] = user.get("is_verified", False)
+                    result["is_business"] = user.get("is_business_account", False)
+                    result["external_url"] = user.get("external_url", "")
+                    result["business_category"] = user.get("business_category_name", "")
+                else:
+                    result["error"] = "Пользователь не найден"
+            else:
+                result["error"] = f"Instagram API error (HTTP {r.status_code})"
+
+    except Exception as e:
+        result["error"] = f"Ошибка Instagram: {type(e).__name__}: {e}"
+
+    return result
+
+
+# ==================== TIKTOK PROFILE LOOKUP ====================
+
+async def tiktok_profile_lookup(username: str) -> dict:
+    """TikTok — детальный профиль по username через публичные источники."""
+    username = username.strip().lstrip("@")
+    result = {"input": username, "found": False, "error": None}
+
+    try:
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True) as c:
+            r = await c.get(f"https://www.tiktok.com/@{username}",
+                            headers={"User-Agent": USER_AGENT})
+
+            if r.status_code == 200 and "Couldn't find this account" not in r.text:
+                text = r.text
+
+                result["found"] = True
+
+                # Имя
+                m = re.search(r'<h1[^>]*>([^<]+)</h1>', text)
+                if m:
+                    result["nickname"] = m.group(1).strip()
+
+                # Описание
+                m = re.search(r'<meta[^>]*name="description"[^>]*content="([^"]+)"', text)
+                if m:
+                    result["bio"] = m.group(1)[:500]
+
+                # Подписчики / подписки из JSON-данных
+                for pat in [
+                    r'"followerCount":(\d+)',
+                    r'"followingCount":(\d+)',
+                    r'"videoCount":(\d+)',
+                    r'"heartCount":(\d+)',
+                    r'"verified":(true|false)',
+                    r'"privateAccount":(true|false)',
+                ]:
+                    m = re.search(pat, text)
+                    if m:
+                        key = pat.split(":")[0].strip('"')
+                        val = m.group(1)
+                        if val in ("true", "false"):
+                            result[key] = val == "true"
+                        else:
+                            result[key] = int(val)
+
+                # Avatar
+                m = re.search(r'"avatarLarger":"([^"]+)"', text)
+                if m:
+                    result["avatar"] = m.group(1).replace("\\/", "/")
+
+            else:
+                result["error"] = "Пользователь не найден"
+
+    except Exception as e:
+        result["error"] = f"Ошибка TikTok: {type(e).__name__}: {e}"
+
+    return result
+
+
+# ==================== TWITTER / X PROFILE LOOKUP ====================
+
+async def twitter_profile_lookup(username: str) -> dict:
+    """Twitter/X — детальный профиль по username через публичный профиль."""
+    username = username.strip().lstrip("@")
+    result = {"input": username, "found": False, "error": None}
+
+    try:
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True) as c:
+            r = await c.get(f"https://x.com/{username}",
+                            headers={"User-Agent": USER_AGENT})
+
+            if r.status_code == 200 and "This account doesn't exist" not in r.text:
+                text = r.text
+
+                result["found"] = True
+
+                # OG title
+                m = re.search(r'<meta[^>]*property="og:title"[^>]*content="([^"]+)"', text)
+                if m:
+                    result["display_name"] = m.group(1)
+
+                # BIO
+                m = re.search(r'<meta[^>]*name="description"[^>]*content="([^"]+)"', text)
+                if m:
+                    result["bio"] = m.group(1)[:500]
+
+                # Avatar
+                m = re.search(r'<meta[^>]*property="og:image"[^>]*content="([^"]+)"', text)
+                if m:
+                    result["avatar"] = m.group(1)
+
+                # Stats из JSON-LD
+                m = re.search(r'"userInteractionCounters"[^}]+"followersCount":(\d+)', text)
+                if m:
+                    result["followers"] = int(m.group(1))
+                m = re.search(r'"followingCount":(\d+)', text)
+                if m:
+                    result["following"] = int(m.group(1))
+                m = re.search(r'"tweetCount":(\d+)', text)
+                if m:
+                    result["tweets"] = int(m.group(1))
+                m = re.search(r'"verified":(true|false)', text)
+                if m:
+                    result["verified"] = m.group(1) == "true"
+
+                # Join date
+                m = re.search(r'"joined":"([^"]+)"', text)
+                if m:
+                    result["joined"] = m.group(1)
+
+                # Location
+                m = re.search(r'"location":"([^"]+)"', text)
+                if m:
+                    result["location"] = m.group(1)
+
+            else:
+                result["error"] = "Пользователь не найден"
+
+    except Exception as e:
+        result["error"] = f"Ошибка Twitter/X: {type(e).__name__}: {e}"
+
+    return result
+
+
+# ==================== YOUTUBE CHANNEL LOOKUP ====================
+
+async def youtube_channel_lookup(username: str) -> dict:
+    """YouTube — профиль канала по @handle через публичную страницу."""
+    username = username.strip().lstrip("@")
+    result = {"input": username, "found": False, "error": None}
+
+    try:
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True) as c:
+            r = await c.get(f"https://www.youtube.com/@{username}",
+                            headers={"User-Agent": USER_AGENT})
+
+            if r.status_code == 200 and "Not Found" not in r.text and "This page doesn't exist" not in r.text:
+                text = r.text
+                result["found"] = True
+
+                # OG:title — имя канала
+                m = re.search(r'<meta[^>]*property="og:title"[^>]*content="([^"]+)"', text)
+                if m:
+                    result["title"] = m.group(1)
+
+                # OG:description — описание
+                m = re.search(r'<meta[^>]*property="og:description"[^>]*content="([^"]+)"', text)
+                if m:
+                    result["description"] = m.group(1)[:500]
+
+                # OG:image — аватарка
+                m = re.search(r'<meta[^>]*property="og:image"[^>]*content="([^"]+)"', text)
+                if m:
+                    result["avatar"] = m.group(1)
+
+                # Подписчики из JSON-LD
+                m = re.search(r'"subscriberCount":(\d+)', text)
+                if m:
+                    result["subscribers"] = int(m.group(1))
+
+                m = re.search(r'"videoCount":(\d+)', text)
+                if m:
+                    result["videos"] = int(m.group(1))
+
+                m = re.search(r'"viewCount":(\d+)', text)
+                if m:
+                    result["views"] = int(m.group(1))
+
+                m = re.search(r'"channelIdentifier":"([^"]+)"', text)
+                if m:
+                    result["channel_id"] = m.group(1)
+
+                m = re.search(r'"externalId":"([^"]+)"', text)
+                if m:
+                    result["youtube_id"] = m.group(1)
+
+                m = re.search(r'"joinedDateText":\s*\{[^}]*"simpleText":"([^"]+)"', text)
+                if m:
+                    result["joined"] = m.group(1)
+
+                # Verified
+                m = re.search(r'"verified":(true|false)', text)
+                if m:
+                    result["verified"] = m.group(1) == "true"
+
+                # Country
+                m = re.search(r'"country":"([^"]+)"', text)
+                if m:
+                    result["country"] = m.group(1)
+
+            else:
+                result["error"] = "Канал не найден"
+
+    except Exception as e:
+        result["error"] = f"Ошибка YouTube: {type(e).__name__}: {e}"
+
+    return result

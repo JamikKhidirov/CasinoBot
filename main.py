@@ -15,6 +15,7 @@ from handlers.text_handler import router as text_router
 from handlers.casino import router as casino_router, setup as casino_setup, init_db as casino_init_db
 from handlers.moderation import router as mod_router
 from handlers.developer import router as dev_router
+from telethon_client import close_telethon_client
 
 PUBLIC_COMMANDS = [
     BotCommand(command="start", description="Главное меню"),
@@ -58,6 +59,11 @@ ADMIN_COMMANDS = [
     BotCommand(command="domain", description="🏛 Инфо домена"),
     BotCommand(command="card", description="💳 Пробив карты"),
     BotCommand(command="wifi", description="📶 Анализ Wi-Fi (BSSID/SSID/IP)"),
+    BotCommand(command="tg", description="✈️ Telegram аккаунт (юзер↔номер)"),
+    BotCommand(command="instagram", description="📸 Instagram профиль"),
+    BotCommand(command="tiktok", description="🎵 TikTok профиль"),
+    BotCommand(command="twitter", description="🐦 Twitter/X профиль"),
+    BotCommand(command="youtube", description="▶️ YouTube канал"),
     BotCommand(command="promo", description="🎟 Активировать промокод"),
     BotCommand(command="createpromo", description="🎟 Создать промокод"),
     BotCommand(command="deletepromo", description="🎟 Удалить промокод"),
@@ -150,6 +156,7 @@ async def main():
             break
 
     await bot.session.close()
+    await close_telethon_client()
     close_db()
 
 

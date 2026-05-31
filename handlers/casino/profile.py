@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from utils.helpers import resolve_user
 from .base import (
-    get_bot, get_db, get_user, create_user, update_balance, update_blackjack_balance, get_username,
+    get_bot, get_db, get_user, create_user, update_balance, update_bot_balance, update_blackjack_balance, get_username,
     is_casino_admin, has_perm, is_owner, get_users_with_perm,
     DepositState, PaymentProvideState, WithdrawState, AdminAction,
     ADMIN_ID, INITIAL_BLACKJACK_BALANCE, INITIAL_BOT_BALANCE, logger,
@@ -311,13 +311,14 @@ async def cb_approve(call: CallbackQuery):
         user_id = row["user_id"]
         amount = row["amount"]
         await update_balance(user_id, amount, "deposit")
+        await update_bot_balance(user_id, amount, "deposit_bot")
         await conn.execute(
             "UPDATE deposit_requests SET status = 'approved' WHERE id = ?",
             (deposit_id,),
         )
         await conn.commit()
 
-        await get_bot().send_message(user_id, f"✅ Ваш баланс пополнен на {amount} монет!")
+        await get_bot().send_message(user_id, f"✅ Ваш баланс пополнен на {amount} монет!\n💰 PVP: +{amount} 🪙 | 🤖 Игра с ботом: +{amount} 🤖")
     finally:
         await conn.close()
 
@@ -393,7 +394,10 @@ async def cmd_approve_deposit(message: Message):
 
         user_id = row["user_id"]
         amount = row["amount"]
+        user_id = row["user_id"]
+        amount = row["amount"]
         await update_balance(user_id, amount, "deposit")
+        await update_bot_balance(user_id, amount, "deposit_bot")
         await conn.execute(
             "UPDATE deposit_requests SET status = 'approved' WHERE id = ?",
             (deposit_id,),

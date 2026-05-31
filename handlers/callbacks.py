@@ -144,6 +144,9 @@ async def cb_report_chat(call: CallbackQuery):
         reporter_name = call.from_user.username or call.from_user.first_name or str(uid)
         partner_info = await call.bot.get_chat(partner)
         partner_name = partner_info.username or partner_info.first_name or str(partner)
+        report_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Просмотреть чат", callback_data=f"view_report_chat_{uid}_{partner}")]
+        ])
         await call.bot.send_message(
             OWNER_ID,
             f"⚠️ <b>Новая жалоба</b>\n\n"
@@ -151,10 +154,43 @@ async def cb_report_chat(call: CallbackQuery):
             f"┃ 👤 Нарушитель: @{partner_name} (<code>{partner}</code>)\n"
             f"┃ 🕐 {now}",
             parse_mode="HTML",
+            reply_markup=report_kb,
         )
     except Exception:
         pass
     await call.answer("✅ Жалоба отправлена разработчику.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("view_report_chat_"))
+async def cb_view_report_chat(call: CallbackQuery):
+    uid = call.from_user.id
+    if not can_read_chats(uid):
+        await call.answer("❌ Доступ только для разработчика.", show_alert=True)
+        return
+    parts = call.data.split("_")
+    reporter_id = int(parts[3])
+    reported_id = int(parts[4])
+    import db
+    db.cur.execute(
+        "SELECT sender_id, message, timestamp FROM messages WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?) ORDER BY id DESC LIMIT 30",
+        (reporter_id, reported_id, reported_id, reporter_id),
+    )
+    rows = db.cur.fetchall()
+    if not rows:
+        await call.answer("❌ Нет сообщений в этом чате.", show_alert=True)
+        return
+    lines = [f"<b>💬 Чат жалобы</b>\n┃ {reporter_id} ↔ {reported_id}\n"]
+    for row in rows:
+        sender = row[0]
+        msg = str(row[1])[:100]
+        ts = str(row[2])[:19] if row[2] else ""
+        arrow = "➡️" if sender == reporter_id else "⬅️"
+        lines.append(f"┃ {arrow} [{ts}] {msg}")
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3997] + "..."
+    await call.message.answer(text, parse_mode="HTML")
+    await call.answer()
 
 
 @router.callback_query(F.data == "back_main")
