@@ -2704,7 +2704,6 @@ async def telegram_account_lookup(input_str: str) -> dict:
         from telethon.errors import UsernameInvalidError, FloodWaitError
         from telethon.tl.functions.users import GetFullUserRequest
         from telethon.tl.functions.messages import GetCommonChatsRequest, SearchGlobalRequest
-        from telethon.tl.functions.channels import GetParticipantChannelsRequest
         from telethon.tl.types import InputMessagesFilterEmpty, InputPeerEmpty, MessageMediaPhoto, MessageMediaDocument
 
         client = await get_telethon_client()
@@ -2822,25 +2821,6 @@ async def telegram_account_lookup(input_str: str) -> dict:
             except Exception as e:
                 logger.debug(f"GetCommonChats: {e}")
 
-        async def get_channels_admin():
-            """Каналы где пользователь админ (только если в контактах)."""
-            try:
-                channels = await client(GetParticipantChannelsRequest(entity.id))
-                chs = []
-                if hasattr(channels, "chats"):
-                    for ch in channels.chats:
-                        chs.append({
-                            "title": getattr(ch, "title", ""),
-                            "username": getattr(ch, "username", ""),
-                            "id": ch.id,
-                            "participants": getattr(ch, "participants_count", 0),
-                        })
-                if chs:
-                    result["admin_channels"] = chs
-                    result["admin_channels_found"] = len(chs)
-            except Exception as e:
-                logger.debug(f"GetParticipantChannels: {e}")
-
         async def search_public_messages():
             """Ищет сообщения с упоминанием пользователя (username/имя) в публичных чатах."""
             queries = []
@@ -2903,7 +2883,7 @@ async def telegram_account_lookup(input_str: str) -> dict:
             if all_msgs:
                 result["public_messages"] = all_msgs[:20]
 
-        await asyncio.gather(get_full_user(), get_common_chats(), get_channels_admin(), search_public_messages())
+        await asyncio.gather(get_full_user(), get_common_chats(), search_public_messages())
 
     except RuntimeError as e:
         result["error"] = str(e)
