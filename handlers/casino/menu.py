@@ -86,13 +86,13 @@ async def cb_casino_top(call: CallbackQuery):
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏆 Топ казино (PVP)", callback_data="casino_top_pvp")],
-        [InlineKeyboardButton(text="⭐ Топ соло", callback_data="casino_top_solo")],
+        [InlineKeyboardButton(text="⭐ Топ с ботом", callback_data="casino_top_solo")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="casino_menu")],
     ])
     await call.message.edit_text(
         "<b>🏆 Выберите топ:</b>\n\n"
         "🏆 <b>Топ казино</b> — игроки с самым большим PVP-балансом\n"
-        "⭐ <b>Топ соло</b> — игроки с наибольшими очками в соло-играх",
+        "⭐ <b>Топ с ботом</b> — игроки с наибольшими очками в играх с ботом",
         parse_mode="HTML",
         reply_markup=markup,
     )
@@ -136,10 +136,10 @@ async def cb_casino_top_solo(call: CallbackQuery):
     finally:
         await conn.close()
     if not rows:
-        await call.message.answer("❌ Пока никто не играл в соло-казино.")
+        await call.message.answer("❌ Пока никто не играл с ботом.")
         await call.answer()
         return
-    text = "<b>⭐ Топ 10 соло-казино</b>\n\n"
+    text = "<b>⭐ Топ 10 с ботом</b>\n\n"
     for i, row in enumerate(rows, 1):
         medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "▫️"
         if row["username"]:
@@ -421,9 +421,9 @@ async def cmd_solo_top(message: Message):
     finally:
         await conn.close()
     if not rows:
-        await message.answer("❌ Пока никто не играл в соло-казино.")
+        await message.answer("❌ Пока никто не играл с ботом.")
         return
-    text = "<b>⭐ Топ 10 соло-казино</b>\n\n"
+    text = "<b>⭐ Топ 10 с ботом</b>\n\n"
     for i, row in enumerate(rows, 1):
         name = row["username"] or f"user_{row['user_id']}"
         medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "▫️"

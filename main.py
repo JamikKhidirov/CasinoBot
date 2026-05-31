@@ -33,7 +33,7 @@ PUBLIC_COMMANDS = [
     BotCommand(command="unlock", description="🔓 Отменить свои игры"),
     BotCommand(command="promo", description="🎟 Активировать промокод"),
     BotCommand(command="solo", description="🎮 Соло-казино (только в группах)"),
-    BotCommand(command="solotop", description="⭐ Топ соло-казино"),
+    BotCommand(command="solotop", description="⭐ Топ с ботом"),
 ]
 
 ADMIN_COMMANDS = [
@@ -70,7 +70,7 @@ ADMIN_COMMANDS = [
     BotCommand(command="deletepromo", description="🎟 Удалить промокод"),
     BotCommand(command="promo_list", description="🎟 Список промокодов"),
     BotCommand(command="solo", description="🎮 Соло-казино (только в группах)"),
-    BotCommand(command="solotop", description="⭐ Топ соло-казино"),
+    BotCommand(command="solotop", description="⭐ Топ с ботом"),
 ]
 
 

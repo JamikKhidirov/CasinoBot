@@ -363,7 +363,7 @@ async def cb_casino_admin_help(call: CallbackQuery):
         "┃ <code>/одобрить ID</code> — одобрить депозит\n\n"
         "<b>Игроки:</b>\n"
         "┃ <code>/игроки</code> — список всех игроков\n"
-        "┃ <code>/solotop</code> — топ соло-казино\n\n"
+        "┃ <code>/solotop</code> — топ с ботом\n\n"
         "<b>Модерация:</b>\n"
         "┃ Кнопки 🚫🔇⚠️📋 в админ-панели\n\n"
         "💡 Все команды также доступны через админ-панель (кнопки выше)."
@@ -727,10 +727,10 @@ async def cb_casino_admin_solotop(call: CallbackQuery):
     finally:
         await conn.close()
     if not rows:
-        await call.message.answer("❌ Пока никто не играл в соло-казино.")
+        await call.message.answer("❌ Пока никто не играл с ботом.")
         await call.answer()
         return
-    text = "<b>⭐ Топ 10 соло-казино</b>\n\n"
+    text = "<b>⭐ Топ 10 с ботом</b>\n\n"
     for i, row in enumerate(rows, 1):
         medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "▫️"
         if row["username"]:
