@@ -13,6 +13,11 @@ async def text_dispatcher(message: Message, state: FSMContext):
     if message.text.startswith("/"):
         return
 
+    # Skip casino game emojis (solo/PVP handlers already process them)
+    from handlers.casino.base import GAMES_CONFIG
+    if message.text.strip() in (cfg["emoji"] for cfg in GAMES_CONFIG.values()):
+        return
+
     uid = message.from_user.id
 
     if message.chat.type != "private":

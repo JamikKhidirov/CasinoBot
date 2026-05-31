@@ -117,6 +117,13 @@ async def _process_solo_roll(msg: Message, uid: int, game_state: dict):
     bot_dice_msg = None
 
     try:
+        def _result_label(val: int) -> str:
+            if game_type == "футбол":
+                return "⚽ ГОЛ!" if val > 3 else "❌ Промах"
+            if game_type == "баскетбол":
+                return "🏀 Попадание!" if val > 3 else "❌ Промах"
+            return str(val)
+
         # Убираем кнопку — ждём результат
         await game_state["msg"].edit_text(
             f"🤖 <b>Игра с ботом</b> {config['emoji']}\n"
@@ -129,10 +136,13 @@ async def _process_solo_roll(msg: Message, uid: int, game_state: dict):
         player_dice = await msg.answer_dice(emoji=config["emoji"])
         await asyncio.sleep(5)
 
+        player_raw = player_dice.dice.value
+        player_adj = player_raw - 1 if game_type in ("дротики", "боулинг") else player_raw
+
         await game_state["msg"].edit_text(
             f"🤖 <b>Игра с ботом</b> {config['emoji']}\n"
             f"💵 Ставка: {bet} монет\n\n"
-            f"{player_tag}: {player_dice.dice.value}\n"
+            f"{player_tag}: {_result_label(player_adj)}\n"
             f"🤖 Бот бросает..."
         )
 
@@ -140,24 +150,13 @@ async def _process_solo_roll(msg: Message, uid: int, game_state: dict):
         bot_dice = bot_dice_msg.dice.value
         await asyncio.sleep(5)
 
-        bot_adjusted = bot_dice - 1 if game_type in ("дротики", "боулинг") else bot_dice
-        player_adjusted = player_dice.dice.value - 1 if game_type in ("дротики", "боулинг") else player_dice.dice.value
-
-        def result_label(val: int) -> str:
-            if game_type == "футбол":
-                return "⚽ ГОЛ!" if val > 3 else "❌ Промах"
-            if game_type == "баскетбол":
-                return "🏀 Попадание!" if val > 3 else "❌ Промах"
-            return str(val)
-
-        player_label = result_label(player_adjusted)
-        bot_label = result_label(bot_adjusted)
+        bot_adj = bot_dice - 1 if game_type in ("дротики", "боулинг") else bot_dice
 
         await game_state["msg"].edit_text(
             f"🤖 <b>Игра с ботом</b> {config['emoji']}\n"
             f"💵 Ставка: {bet} монет\n\n"
-            f"{player_tag}: {player_label}\n"
-            f"🤖 Бот: {bot_label}"
+            f"{player_tag}: {_result_label(player_adj)}\n"
+            f"🤖 Бот: {_result_label(bot_adj)}"
         )
 
         await asyncio.sleep(1)
@@ -166,13 +165,13 @@ async def _process_solo_roll(msg: Message, uid: int, game_state: dict):
 
         def is_player_win() -> str:
             if game_type in ("футбол", "баскетбол"):
-                p_hit = player_adjusted > 3
-                b_hit = bot_adjusted > 3
+                p_hit = player_adj > 3
+                b_hit = bot_adj > 3
                 if p_hit and not b_hit: return "win"
                 if b_hit and not p_hit: return "lose"
                 return "tie"
-            if player_adjusted > bot_adjusted: return "win"
-            if bot_adjusted > player_adjusted: return "lose"
+            if player_adj > bot_adj: return "win"
+            if bot_adj > player_adj: return "lose"
             return "tie"
 
         result = is_player_win()

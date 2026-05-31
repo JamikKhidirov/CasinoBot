@@ -552,6 +552,13 @@ async def handle_game_emoji(message: Message):
                 break
 
         if not game:
+            # If user has a solo game, let the solo handler process the emoji
+            try:
+                from .games_solo import _solo_games
+                if uid in _solo_games:
+                    return
+            except ImportError:
+                pass
             await message.answer("❌ У вас нет активной игры этого типа.")
             return
 
