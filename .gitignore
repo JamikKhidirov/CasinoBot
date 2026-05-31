@@ -7,3 +7,4 @@ bot_errors.log
 .env
 
 *.txt
+telethon_session.session

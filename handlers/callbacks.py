@@ -9,6 +9,13 @@ from config import OWNER_ID
 router = Router()
 
 
+async def safe_answer(call: CallbackQuery, *args, **kwargs):
+    try:
+        await safe_answer(call, *args, **kwargs)
+    except Exception:
+        pass
+
+
 def _show_osint(uid: int) -> bool:
     return is_dev(uid)
 
@@ -16,7 +23,7 @@ def _show_osint(uid: int) -> bool:
 @router.callback_query(F.data == "start_chat")
 async def cb_start_chat(call: CallbackQuery, state: FSMContext):
     if call.message.chat.type != "private":
-        await call.answer("❌ Анонимный чат доступен только в личных сообщениях.", show_alert=True)
+        await safe_answer(call, "❌ Анонимный чат доступен только в личных сообщениях.", show_alert=True)
         return
     uid = call.from_user.id
 
@@ -26,13 +33,13 @@ async def cb_start_chat(call: CallbackQuery, state: FSMContext):
         await state.clear()
 
     if is_banned(uid):
-        await call.answer("⚠️ Вы забанены.", show_alert=True)
+        await safe_answer(call, "⚠️ Вы забанены.", show_alert=True)
         return
     if uid in active_users:
-        await call.answer("✅ Уже в чате.", show_alert=True)
+        await safe_answer(call, "✅ Уже в чате.", show_alert=True)
         return
     if uid in waiting_users:
-        await call.answer("🔍 Уже ищете.", show_alert=True)
+        await safe_answer(call, "🔍 Уже ищете.", show_alert=True)
         return
 
     if waiting_users and waiting_users[0] != uid:
@@ -57,7 +64,7 @@ async def cb_start_chat(call: CallbackQuery, state: FSMContext):
 async def cb_leave_chat(call: CallbackQuery):
     uid = call.from_user.id
     if uid not in active_users:
-        await call.answer("❌ Не в чате.", show_alert=True)
+        await safe_answer(call, "❌ Не в чате.", show_alert=True)
         return
     partner = active_users.pop(uid)
     active_users.pop(partner, None)
@@ -71,11 +78,11 @@ async def cb_leave_chat(call: CallbackQuery):
 async def cb_cancel_search(call: CallbackQuery):
     uid = call.from_user.id
     if uid not in waiting_users:
-        await call.answer("❌ Вы не в поиске.", show_alert=True)
+        await safe_answer(call, "❌ Вы не в поиске.", show_alert=True)
         return
     waiting_users.remove(uid)
     await call.message.edit_text("❌ Поиск отменён.", reply_markup=main_kb(show_osint=_show_osint(uid), show_admin=is_admin(uid)))
-    await call.answer()
+    await safe_answer(call)
 
 
 @router.callback_query(F.data == "myprofile")
@@ -95,7 +102,7 @@ async def cb_my_profile(call: CallbackQuery):
     else:
         text = f"👤 Профиль\n\n🆔 ID: {uid}\n📝 Зарегистрируйтесь через /start"
     await call.message.edit_text(text, reply_markup=main_kb(show_osint=_show_osint(uid), show_admin=is_admin(uid)))
-    await call.answer()
+    await safe_answer(call)
 
 
 @router.callback_query(F.data == "mystats")
@@ -114,7 +121,7 @@ async def cb_my_stats(call: CallbackQuery):
         f"🎰 Казино: используйте /казино"
     )
     await call.message.edit_text(text, reply_markup=main_kb(show_osint=_show_osint(uid), show_admin=is_admin(uid)))
-    await call.answer()
+    await safe_answer(call)
 
 
 @router.callback_query(F.data == "report_chat")
@@ -122,7 +129,7 @@ async def cb_report_chat(call: CallbackQuery):
     uid = call.from_user.id
     from handlers.user import active_users
     if uid not in active_users:
-        await call.answer("❌ Вы не в чате.", show_alert=True)
+        await safe_answer(call, "❌ Вы не в чате.", show_alert=True)
         return
     partner = active_users[uid]
     import db
@@ -158,14 +165,14 @@ async def cb_report_chat(call: CallbackQuery):
         )
     except Exception:
         pass
-    await call.answer("✅ Жалоба отправлена разработчику.", show_alert=True)
+    await safe_answer(call, "✅ Жалоба отправлена разработчику.", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("view_report_chat_"))
 async def cb_view_report_chat(call: CallbackQuery):
     uid = call.from_user.id
     if not can_read_chats(uid):
-        await call.answer("❌ Доступ только для разработчика.", show_alert=True)
+        await safe_answer(call, "❌ Доступ только для разработчика.", show_alert=True)
         return
     parts = call.data.split("_")
     reporter_id = int(parts[3])
@@ -177,7 +184,7 @@ async def cb_view_report_chat(call: CallbackQuery):
     )
     rows = db.cur.fetchall()
     if not rows:
-        await call.answer("❌ Нет сообщений в этом чате.", show_alert=True)
+        await safe_answer(call, "❌ Нет сообщений в этом чате.", show_alert=True)
         return
     lines = [f"<b>💬 Чат жалобы</b>\n┃ {reporter_id} ↔ {reported_id}\n"]
     for row in rows:
@@ -190,7 +197,7 @@ async def cb_view_report_chat(call: CallbackQuery):
     if len(text) > 4000:
         text = text[:3997] + "..."
     await call.message.answer(text, parse_mode="HTML")
-    await call.answer()
+    await safe_answer(call)
 
 
 @router.callback_query(F.data == "back_main")
@@ -198,14 +205,17 @@ async def cb_back_main(call: CallbackQuery):
     uid = call.from_user.id
     show_chat = call.message.chat.type == "private"
     await call.message.edit_text("👋 Главное меню", reply_markup=main_kb(show_chat=show_chat, show_osint=_show_osint(uid), show_admin=is_admin(uid)))
-    await call.answer()
+    try:
+        await safe_answer(call)
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data == "admin_panel")
 async def cb_admin_panel(call: CallbackQuery):
     uid = call.from_user.id
     if not is_admin(uid):
-        await call.answer("❌ Доступ только администраторам.", show_alert=True)
+        await safe_answer(call, "❌ Доступ только администраторам.", show_alert=True)
         return
     # Устанавливаем админ-команды для этого чата
     from main import ADMIN_COMMANDS
@@ -224,7 +234,7 @@ async def cb_admin_panel(call: CallbackQuery):
         [InlineKeyboardButton(text="◀️ На главную", callback_data="back_main")],
     ])
     await call.message.edit_text("<b>🛡 Админ-панель</b>\nВыберите раздел:", parse_mode="HTML", reply_markup=keyboard)
-    await call.answer()
+    await safe_answer(call)
 
 
 @router.callback_query(F.data == "admin_commands")
@@ -317,7 +327,7 @@ async def cb_admin_commands(call: CallbackQuery):
             [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")]
         ])
     )
-    await call.answer()
+    await safe_answer(call)
 
 
 @router.callback_query(F.data == "admin_stats")
@@ -345,7 +355,7 @@ async def cb_admin_stats(call: CallbackQuery):
             [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")]
         ])
     )
-    await call.answer()
+    await safe_answer(call)
 
 
 @router.callback_query(F.data == "admin_mod")
@@ -370,7 +380,7 @@ async def cb_admin_mod(call: CallbackQuery):
             [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")]
         ])
     )
-    await call.answer()
+    await safe_answer(call)
 
 
 # ─── Чат-лог (админ-панель) ─────────────────────────────────────
@@ -379,7 +389,7 @@ async def cb_admin_mod(call: CallbackQuery):
 async def cb_admin_chatlog(call: CallbackQuery):
     uid = call.from_user.id
     if not can_read_chats(uid):
-        await call.answer("❌ Доступ только для разработчика или назначенных.", show_alert=True)
+        await safe_answer(call, "❌ Доступ только для разработчика или назначенных.", show_alert=True)
         return
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👥 Все пользователи с чатами", callback_data="chatlog_users")],
@@ -388,7 +398,7 @@ async def cb_admin_chatlog(call: CallbackQuery):
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")],
     ])
     await call.message.edit_text("<b>💬 Чат-лог анонимного чата</b>\nВыберите действие:", parse_mode="HTML", reply_markup=kb)
-    await call.answer()
+    await safe_answer(call)
 
 
 @router.callback_query(F.data == "chatlog_recent")
@@ -413,7 +423,7 @@ async def cb_chatlog_recent(call: CallbackQuery):
     if len(text) > 4000:
         text = text[:3997] + "..."
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_chatlog")]]))
-    await call.answer()
+    await safe_answer(call)
 
 
 @router.callback_query(F.data == "chatlog_users")
@@ -440,7 +450,7 @@ async def cb_chatlog_users(call: CallbackQuery):
         lines = lines[:40]
     text = "\n".join(lines)
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="admin_chatlog")]]))
-    await call.answer()
+    await safe_answer(call)
 
 
 @router.callback_query(F.data == "chatlog_search")
@@ -459,7 +469,7 @@ async def cb_chatlog_search(call: CallbackQuery):
             [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_chatlog")]
         ])
     )
-    await call.answer()
+    await safe_answer(call)
 
 
 @router.callback_query(F.data.startswith("chatlog_user_"))
@@ -472,7 +482,7 @@ async def cb_chatlog_user(call: CallbackQuery):
     db.cur.execute("SELECT sender_id, message, timestamp FROM messages WHERE sender_id = ? OR receiver_id = ? ORDER BY id DESC LIMIT 30", (target_id, target_id))
     rows = db.cur.fetchall()
     if not rows:
-        await call.answer("❌ Нет сообщений у этого пользователя.", show_alert=True)
+        await safe_answer(call, "❌ Нет сообщений у этого пользователя.", show_alert=True)
         return
     lines = [f"<b>💬 Чат пользователя {target_id}</b>\n"]
     for row in rows:
@@ -485,7 +495,7 @@ async def cb_chatlog_user(call: CallbackQuery):
     if len(text) > 4000:
         text = text[:3997] + "..."
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="chatlog_users")]]))
-    await call.answer()
+    await safe_answer(call)
 
 
 @router.callback_query(F.data == "help")
@@ -546,4 +556,4 @@ async def cb_help(call: CallbackQuery):
         await call.message.edit_text(text, parse_mode="HTML", reply_markup=main_kb(show_osint=show_osint, show_admin=is_adm))
     except Exception:
         await call.message.answer(text, parse_mode="HTML", reply_markup=main_kb(show_osint=show_osint, show_admin=is_adm))
-    await call.answer()
+    await safe_answer(call)

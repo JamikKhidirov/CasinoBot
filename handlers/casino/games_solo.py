@@ -5,7 +5,7 @@ import random
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from .base import (
     get_bot, get_db, get_user, create_user, update_bot_balance, get_username,
@@ -14,6 +14,9 @@ from .base import (
 from .keyboards import solo_bet_selection_kb
 
 router = Router()
+
+# Временные состояния игр с ботом
+_solo_games: dict[int, dict] = {}
 
 
 @router.message(Command("сботом"))
@@ -79,6 +82,11 @@ async def solo_game_play(message: Message, game_type: str, bet: int, user_id: in
         await message.reply(f"❌ Недостаточно средств! Баланс: {bal} монет для игры с ботом")
         return
 
+    # Если у юзера уже есть активная игра — не даём начать новую
+    if uid in _solo_games:
+        await message.reply("❌ У вас уже есть активная игра! Завершите её.")
+        return
+
     await update_bot_balance(uid, -bet, "solo_reserve")
 
     config = GAMES_CONFIG[game_type]
@@ -88,136 +96,157 @@ async def solo_game_play(message: Message, game_type: str, bet: int, user_id: in
         f"🤖 <b>Игра с ботом</b> {config['emoji']}\n"
         f"💵 Ставка: {bet} монет\n"
         f"💰 Ваш счёт: {bal} монет\n\n"
-        f"{player_tag} бросает..."
+        f"{player_tag}, нажмите кнопку👇 или отправьте {config['emoji']}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"Бросить {config['emoji']}", callback_data=f"solo_roll_{uid}")]
+        ])
     )
 
-    await asyncio.sleep(1)
-    player_dice = await message.answer_dice(emoji=config["emoji"])
-    await asyncio.sleep(5)
+    _solo_games[uid] = {"game_type": game_type, "bet": bet, "msg": msg, "player_tag": player_tag, "bal": bal}
 
-    await msg.edit_text(
-        f"🤖 <b>Игра с ботом</b> {config['emoji']}\n"
-        f"💵 Ставка: {bet} монет\n\n"
-        f"{player_tag}: {player_dice.dice.value}\n"
-        f"🤖 Бот бросает..."
-    )
 
-    bot_dice_msg = await message.answer_dice(emoji=config["emoji"])
-    bot_dice = bot_dice_msg.dice.value
-    await asyncio.sleep(5)
-
-    bot_adjusted = bot_dice - 1 if game_type in ("дротики", "боулинг") else bot_dice
-    player_adjusted = player_dice.dice.value - 1 if game_type in ("дротики", "боулинг") else player_dice.dice.value
-
-    def result_label(val: int) -> str:
-        if game_type == "футбол":
-            return "⚽ ГОЛ!" if val > 3 else "❌ Промах"
-        if game_type == "баскетбол":
-            return "🏀 Попадание!" if val > 3 else "❌ Промах"
-        return str(val)
-
-    player_label = result_label(player_adjusted)
-    bot_label = result_label(bot_adjusted)
-
-    await msg.edit_text(
-        f"🤖 <b>Игра с ботом</b> {config['emoji']}\n"
-        f"💵 Ставка: {bet} монет\n\n"
-        f"{player_tag}: {player_label}\n"
-        f"🤖 Бот: {bot_label}"
-    )
-
-    await asyncio.sleep(1)
-    new_user = await get_user(uid)
-    new_bal = new_user["bot_balance"] if new_user else bal
-
-    def is_player_win() -> str:
-        if game_type in ("футбол", "баскетбол"):
-            p_hit = player_adjusted > 3
-            b_hit = bot_adjusted > 3
-            if p_hit and not b_hit: return "win"
-            if b_hit and not p_hit: return "lose"
-            return "tie"
-        if player_adjusted > bot_adjusted: return "win"
-        if bot_adjusted > player_adjusted: return "lose"
-        return "tie"
-
+async def _process_solo_roll(msg: Message, uid: int, game_state: dict):
+    """Выполняет бросок пользователя и ответный бросок бота."""
+    game_type = game_state["game_type"]
+    bet = game_state["bet"]
+    player_tag = game_state["player_tag"]
+    bal = game_state["bal"]
+    config = GAMES_CONFIG[game_type]
     conn = None
-    result = is_player_win()
-    if result == "win":
-        prize = bet * 2
-        await update_bot_balance(uid, prize, "solo_win")
-        await message.answer(
-            f"🏆 <b>Вы выиграли!</b> +{prize} монет\n"
-            f"💰 Ваш счёт: {new_bal + prize} монет",
-            reply_markup=_after_game_kb(game_type),
+    player_dice = None
+    bot_dice_msg = None
+
+    try:
+        # Убираем кнопку — ждём результат
+        await game_state["msg"].edit_text(
+            f"🤖 <b>Игра с ботом</b> {config['emoji']}\n"
+            f"💵 Ставка: {bet} монет\n"
+            f"💰 Ваш счёт: {bal} монет\n\n"
+            f"{player_tag} бросает..."
         )
-        conn = await get_db()
-        try:
+
+        await asyncio.sleep(0.5)
+        player_dice = await msg.answer_dice(emoji=config["emoji"])
+        await asyncio.sleep(5)
+
+        await game_state["msg"].edit_text(
+            f"🤖 <b>Игра с ботом</b> {config['emoji']}\n"
+            f"💵 Ставка: {bet} монет\n\n"
+            f"{player_tag}: {player_dice.dice.value}\n"
+            f"🤖 Бот бросает..."
+        )
+
+        bot_dice_msg = await msg.answer_dice(emoji=config["emoji"])
+        bot_dice = bot_dice_msg.dice.value
+        await asyncio.sleep(5)
+
+        bot_adjusted = bot_dice - 1 if game_type in ("дротики", "боулинг") else bot_dice
+        player_adjusted = player_dice.dice.value - 1 if game_type in ("дротики", "боулинг") else player_dice.dice.value
+
+        def result_label(val: int) -> str:
+            if game_type == "футбол":
+                return "⚽ ГОЛ!" if val > 3 else "❌ Промах"
+            if game_type == "баскетбол":
+                return "🏀 Попадание!" if val > 3 else "❌ Промах"
+            return str(val)
+
+        player_label = result_label(player_adjusted)
+        bot_label = result_label(bot_adjusted)
+
+        await game_state["msg"].edit_text(
+            f"🤖 <b>Игра с ботом</b> {config['emoji']}\n"
+            f"💵 Ставка: {bet} монет\n\n"
+            f"{player_tag}: {player_label}\n"
+            f"🤖 Бот: {bot_label}"
+        )
+
+        await asyncio.sleep(1)
+        new_user = await get_user(uid)
+        new_bal = new_user["bot_balance"] if new_user else bal
+
+        def is_player_win() -> str:
+            if game_type in ("футбол", "баскетбол"):
+                p_hit = player_adjusted > 3
+                b_hit = bot_adjusted > 3
+                if p_hit and not b_hit: return "win"
+                if b_hit and not p_hit: return "lose"
+                return "tie"
+            if player_adjusted > bot_adjusted: return "win"
+            if bot_adjusted > player_adjusted: return "lose"
+            return "tie"
+
+        result = is_player_win()
+        if result == "win":
+            prize = bet * 2
+            await update_bot_balance(uid, prize, "solo_win")
+            await msg.answer(
+                f"🏆 <b>Вы выиграли!</b> +{prize} монет\n"
+                f"💰 Ваш счёт: {new_bal + prize} монет",
+                reply_markup=_after_game_kb(game_type),
+            )
+            conn = await get_db()
             await conn.execute(
                 "INSERT INTO solo_scores (user_id, username, score, games_played) VALUES (?, ?, ?, 1) "
                 "ON CONFLICT(user_id) DO UPDATE SET score = score + ?, games_played = games_played + 1",
                 (uid, player_tag, prize, prize),
             )
             await conn.commit()
-        except Exception:
-            pass
-    elif result == "lose":
-        await update_bot_balance(uid, 0, "solo_lose")
-        await message.answer(
-            f"❌ <b>Бот выиграл!</b> -{bet} монет\n"
-            f"💰 Ваш счёт: {new_bal} монет",
-            reply_markup=_after_game_kb(game_type),
-        )
-        conn = await get_db()
-        try:
+        elif result == "lose":
+            await update_bot_balance(uid, 0, "solo_lose")
+            await msg.answer(
+                f"❌ <b>Бот выиграл!</b> -{bet} монет\n"
+                f"💰 Ваш счёт: {new_bal} монет",
+                reply_markup=_after_game_kb(game_type),
+            )
+            conn = await get_db()
             await conn.execute(
                 "INSERT INTO solo_scores (user_id, username, score, games_played) VALUES (?, ?, 0, 1) "
                 "ON CONFLICT(user_id) DO UPDATE SET games_played = games_played + 1",
                 (uid, player_tag),
             )
             await conn.commit()
-        except Exception:
-            pass
-    else:
-        await update_bot_balance(uid, bet, "solo_tie")
-        await message.answer(
-            f"🎭 <b>Ничья!</b> Ставка возвращена.\n"
-            f"💰 Ваш счёт: {new_bal + bet} монет",
-            reply_markup=_after_game_kb(game_type),
-        )
-        conn = await get_db()
-        try:
+        else:
+            await update_bot_balance(uid, bet, "solo_tie")
+            await msg.answer(
+                f"🎭 <b>Ничья!</b> Ставка возвращена.\n"
+                f"💰 Ваш счёт: {new_bal + bet} монет",
+                reply_markup=_after_game_kb(game_type),
+            )
+            conn = await get_db()
             await conn.execute(
                 "INSERT INTO solo_scores (user_id, username, score, games_played) VALUES (?, ?, ?, 1) "
                 "ON CONFLICT(user_id) DO UPDATE SET score = score + ?, games_played = games_played + 1",
                 (uid, player_tag, bet, bet),
             )
             await conn.commit()
-        except Exception:
-            pass
 
-    # Cleanup: delete dice animation messages
-    try:
-        import asyncio
-        await asyncio.sleep(1)
-        cleanup_ids = []
-        if player_dice and hasattr(player_dice, 'message_id'):
-            cleanup_ids.append(player_dice.message_id)
-        if bot_dice_msg and hasattr(bot_dice_msg, 'message_id'):
-            cleanup_ids.append(bot_dice_msg.message_id)
-        for mid in cleanup_ids:
-            try:
-                await message.bot.delete_message(message.chat.id, mid)
-            except:
-                pass
-    except:
-        pass
-
-    if conn:
+    except Exception as e:
+        logger.error(f"Solo roll error for {uid}: {e}")
+    finally:
+        # Cleanup: delete dice animation messages
         try:
-            await conn.close()
-        except Exception:
+            await asyncio.sleep(1)
+            cleanup_ids = []
+            if player_dice and hasattr(player_dice, 'message_id'):
+                cleanup_ids.append(player_dice.message_id)
+            if bot_dice_msg and hasattr(bot_dice_msg, 'message_id'):
+                cleanup_ids.append(bot_dice_msg.message_id)
+            for mid in cleanup_ids:
+                try:
+                    await msg.bot.delete_message(msg.chat.id, mid)
+                except:
+                    pass
+        except:
             pass
+
+        if conn:
+            try:
+                await conn.close()
+            except Exception:
+                pass
+
+        # Удаляем из активных игр
+        _solo_games.pop(uid, None)
 
 
 def _after_game_kb(game_type: str):
@@ -227,6 +256,30 @@ def _after_game_kb(game_type: str):
          InlineKeyboardButton(text="🎲 Другие игры", callback_data="casino_play_bot")],
         [InlineKeyboardButton(text="🏠 Казино", callback_data="casino_menu")],
     ])
+
+
+@router.callback_query(F.data.startswith("solo_roll_"))
+async def cb_solo_roll(call: CallbackQuery):
+    uid = call.from_user.id
+    game = _solo_games.get(uid)
+    if not game:
+        await call.answer("❌ Игра не найдена или уже завершена", show_alert=True)
+        return
+    await call.answer()
+    await _process_solo_roll(call.message, uid, game)
+
+
+@router.message(F.text.in_(list({cfg["emoji"]: gt for gt, cfg in GAMES_CONFIG.items()}.keys())))
+async def solo_emoji_throw(message: Message):
+    uid = message.from_user.id
+    game = _solo_games.get(uid)
+    if not game:
+        return
+    text = message.text.strip()
+    cfg = GAMES_CONFIG[game["game_type"]]
+    if text != cfg["emoji"]:
+        return
+    await _process_solo_roll(message, uid, game)
 
 
 @router.callback_query(F.data.startswith("casino_solo_pick_"))
