@@ -126,6 +126,46 @@ def can_read_chats(uid: int) -> bool:
         return False
 
 
+def has_osint_access(uid: int) -> bool:
+    """Доступ к OSINT: OWNER, админы, или выдано через dev_permissions.osint_access."""
+    if uid == OWNER_ID:
+        return True
+    if is_admin(uid):
+        return True
+    try:
+        db.cur.execute("SELECT osint_access FROM dev_permissions WHERE user_id = ?", (uid,))
+        row = db.cur.fetchone()
+        return row is not None and row[0] == 1
+    except:
+        return False
+
+
+def grant_osint_access(uid: int) -> None:
+    db.cur.execute(
+        "INSERT INTO dev_permissions (user_id, osint_access) VALUES (?, 1) ON CONFLICT(user_id) DO UPDATE SET osint_access = 1",
+        (uid,),
+    )
+    db.conn.commit()
+
+
+def revoke_osint_access(uid: int) -> None:
+    db.cur.execute(
+        "UPDATE dev_permissions SET osint_access = 0 WHERE user_id = ?",
+        (uid,),
+    )
+    db.conn.commit()
+
+
+def list_osint_users() -> list[dict]:
+    try:
+        db.cur.execute(
+            "SELECT d.user_id, u.username, u.nickname FROM dev_permissions d LEFT JOIN users u ON u.user_id = d.user_id WHERE d.osint_access = 1"
+        )
+        return [{"user_id": r[0], "username": r[1], "nickname": r[2]} for r in db.cur.fetchall()]
+    except:
+        return []
+
+
 def resolve_user(text: str) -> int | None:
     """Resolve @username or numeric ID to user_id."""
     text = text.strip()

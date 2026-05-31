@@ -4,7 +4,8 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from utils.helpers import (
     is_admin, is_banned, is_muted, get_warns, add_warn,
     ban_user, unban_user, mute_user, unmute_user, can_moderate, get_username_safe,
-    get_user_display, can_read_chats, resolve_user
+    get_user_display, can_read_chats, resolve_user,
+    has_osint_access, grant_osint_access, revoke_osint_access, list_osint_users,
 )
 from handlers.user import active_users, waiting_users
 import db
@@ -21,7 +22,8 @@ def mod_kb() -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="🔊 Размутить", callback_data="mod_unmute")],
         [InlineKeyboardButton(text="⚠️ Варн", callback_data="mod_warn"),
          InlineKeyboardButton(text="📊 Проверить", callback_data="mod_check")],
-        [InlineKeyboardButton(text="💬 Чат-админка", callback_data="mod_chats")],
+        [InlineKeyboardButton(text="💬 Чат-админка", callback_data="mod_chats"),
+         InlineKeyboardButton(text="🔑 OSINT доступ", callback_data="mod_osint")],
         [InlineKeyboardButton(text="◀️ На главную", callback_data="back_main")],
     ])
 
@@ -61,6 +63,23 @@ async def cb_mod(call: CallbackQuery):
 
     if action == "chats":
         await _show_chat_admin(call.message)
+    elif action == "osint":
+        users = list_osint_users()
+        lines = ["<b>🔑 Управление OSINT доступом</b>\n\n"]
+        if users:
+            lines.append("┃ <b>Есть доступ:</b>")
+            for u in users:
+                name = u["nickname"] or u["username"] or "unknown"
+                lines.append(f"┃ • {name} | <code>{u['user_id']}</code>")
+        else:
+            lines.append("┃ Нет пользователей с доступом.")
+        lines.append("\n┃ <b>Команды:</b>")
+        lines.append("┃ /grant_osint &lt;id&gt; — выдать доступ")
+        lines.append("┃ /revoke_osint &lt;id&gt; — отозвать доступ")
+        lines.append("┃ /osint_users — список")
+        await call.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="back_mod")]
+        ]))
     elif action in help_texts:
         await call.message.edit_text(help_texts[action][0], parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=back_btn))
     else:
@@ -498,3 +517,56 @@ async def cmd_warns(message: Message):
         return
     warns = get_warns(target_id)
     await message.answer(f"⚠️ Варны: {get_user_display(target_id)}: {warns}/3", parse_mode="HTML")
+
+
+# ─── OSINT access management ─────────────────────────────────────────
+
+
+@router.message(Command("grant_osint"))
+async def cmd_grant_osint(message: Message):
+    if not is_dev(message.from_user.id):
+        await message.answer("❌ Только разработчик.")
+        return
+    parts = message.text.split()
+    if len(parts) < 2:
+        await message.answer("❌ Формат: <code>/grant_osint user_id</code>", parse_mode="HTML")
+        return
+    target_id = resolve_user(parts[1])
+    if target_id is None:
+        await message.answer("❌ Пользователь не найден.")
+        return
+    grant_osint_access(target_id)
+    await message.answer(f"✅ OSINT доступ выдан: {get_user_display(target_id)}", parse_mode="HTML")
+
+
+@router.message(Command("revoke_osint"))
+async def cmd_revoke_osint(message: Message):
+    if not is_dev(message.from_user.id):
+        await message.answer("❌ Только разработчик.")
+        return
+    parts = message.text.split()
+    if len(parts) < 2:
+        await message.answer("❌ Формат: <code>/revoke_osint user_id</code>", parse_mode="HTML")
+        return
+    target_id = resolve_user(parts[1])
+    if target_id is None:
+        await message.answer("❌ Пользователь не найден.")
+        return
+    revoke_osint_access(target_id)
+    await message.answer(f"❌ OSINT доступ отозван: {get_user_display(target_id)}", parse_mode="HTML")
+
+
+@router.message(Command("osint_users"))
+async def cmd_osint_users(message: Message):
+    if not is_dev(message.from_user.id):
+        await message.answer("❌ Только разработчик.")
+        return
+    users = list_osint_users()
+    if not users:
+        await message.answer("📋 Нет пользователей с OSINT доступом.")
+        return
+    lines = ["<b>📋 Пользователи с OSINT доступом:</b>\n"]
+    for u in users:
+        name = u["nickname"] or u["username"] or "unknown"
+        lines.append(f"┃ {name} | <code>{u['user_id']}</code>")
+    await message.answer("\n".join(lines), parse_mode="HTML")

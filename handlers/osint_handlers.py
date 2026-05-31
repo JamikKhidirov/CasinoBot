@@ -4,7 +4,7 @@ from aiogram import Router, F
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message, CallbackQuery
 from utils.keyboards import main_kb, osint_menu_kb, osint_result_kb
-from utils.helpers import is_admin, is_dev
+from utils.helpers import is_admin, is_dev, has_osint_access
 from config import OWNER_ID
 from db import log_osint_query
 from osint import (phone_lookup, email_lookup, username_lookup, ip_lookup,
@@ -1067,8 +1067,8 @@ async def _execute_lookup(message: Message, mode: str, query: str):
     """Выполняет OSINT-поиск и отправляет результат."""
     uid = message.from_user.id
     result = {}
-    if not is_dev(uid) and not is_admin(uid):
-        await message.answer("❌ OSINT доступен только администраторам.")
+    if not has_osint_access(uid):
+        await message.answer("❌ Доступ к OSINT только для администраторов.")
         return
 
     await message.answer("⏳ Выполняю поиск...")
@@ -1217,7 +1217,7 @@ def _cmd_shortcut(mode: str, prompt: str, example: str):
     """Создаёт обработчик для /команда [аргументы]."""
     async def handler(message: Message, command: CommandObject):
         uid = message.from_user.id
-        if not is_dev(uid) and not is_admin(uid):
+        if not has_osint_access(uid):
             await message.answer("❌ OSINT доступен только администраторам.")
             return
         if command.args:
@@ -1339,7 +1339,7 @@ router.message.register(_cmd_shortcut("youtube", "▶️ Введите handle Y
 @router.message(Command("help"))
 async def cmd_help(message: Message):
     uid = message.from_user.id
-    show_osint = is_dev(uid) or is_admin(uid)
+    show_osint = has_osint_access(uid)
     is_adm = is_admin(uid)
     parts = ["<b>👋 Команды бота</b>\n"]
     if show_osint:
@@ -1448,7 +1448,7 @@ async def osint_callback(call: CallbackQuery):
     }
 
     if data in prompts:
-        if not is_dev(uid) and not is_admin(uid):
+        if not has_osint_access(uid):
             await call.answer("❌ OSINT доступен только администраторам.", show_alert=True)
             return
         msg, mode = prompts[data]

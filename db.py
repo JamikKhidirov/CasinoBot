@@ -99,6 +99,11 @@ def init_db():
         conn.commit()
     except:
         pass
+    try:
+        cur.execute("ALTER TABLE dev_permissions ADD COLUMN osint_access INTEGER DEFAULT 0")
+        conn.commit()
+    except:
+        pass
 
 
 def close_db():
