@@ -323,6 +323,7 @@ async def process_dice_roll(game: GameRoom, player_id: int, dice_value: int):
                 "⚽": f"{'⚽ ГОЛ!' if dice_value > 2 else '❌ Промах!'}",
                 "🏀": f"{'🏀 Попадание!' if dice_value > 2 else '❌ Промах!'}",
                 "🎯": f"{adjusted}",
+                "🎳": f"{adjusted}",
             }.get(config["emoji"], f"{dice_value}")
             result_msg = await get_bot().send_message(
                 game.chat_id, f"{player_name}: {score_text} {config['emoji']}"
