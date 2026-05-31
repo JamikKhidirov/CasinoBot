@@ -3,7 +3,7 @@ import re
 from aiogram import Router, F
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message, CallbackQuery
-from utils.keyboards import main_kb, osint_menu_kb
+from utils.keyboards import main_kb, osint_menu_kb, osint_result_kb
 from utils.helpers import is_admin, is_dev
 from config import OWNER_ID
 from db import log_osint_query
@@ -1206,9 +1206,9 @@ async def _execute_lookup(message: Message, mode: str, query: str):
     import logging
     logger = logging.getLogger(__name__)
     logger.info(f"Ответ OSINT [{mode}] для user={uid}: {formatted[:1500]}")
+    logger.info(f"all_names={result.get('all_names', [])} social_profiles={result.get('social_profiles', {}).get('profiles', [])}" if mode == "phone" else "")
 
-    await message.answer(formatted, parse_mode="HTML", disable_web_page_preview=True)
-    await message.answer("Выберите действие:", reply_markup=osint_menu_kb())
+    await message.answer("Выберите действие:", reply_markup=osint_result_kb(mode, result))
 
 
 def _cmd_shortcut(mode: str, prompt: str, example: str):
@@ -1241,6 +1241,89 @@ router.message.register(_cmd_shortcut("wifi", "📶 <b>Анализ Wi-Fi</b>\n\
     "💡 Где взять BSSID: настройки роутера → статус, "
     "или приложение WiFi Analyzer (Google Play)", "AA:BB:CC:11:22:33"), Command("wifi"))
 
+# ==================== TELEGRAPH SETUP (LOGIN FLOW) ====================
+
+_tg_login_state: dict[int, dict] = {}  # uid -> {"phone": str, "phone_code_hash": str}
+
+
+@router.message(Command("setup_tg"))
+async def cmd_setup_tg(message: Message):
+    uid = message.from_user.id
+    if not is_dev(uid):
+        await message.answer("❌ Только разработчик")
+        return
+
+    from telethon_client import try_init_client
+    ok, msg = await try_init_client()
+    if ok:
+        await message.answer(f"✅ Telethon уже авторизован!\n{msg}")
+        return
+
+    await message.answer(
+        "📱 <b>Настройка Telethon</b>\n\n"
+        "Введите номер телефона в формате +79991234567:\n\n"
+        "💡 Номер аккаунта Telegram, от которого будет работать поиск",
+        parse_mode="HTML"
+    )
+    _tg_login_state[uid] = {}
+
+
+@router.message(F.text.regexp(r'^\+?\d{10,15}$'))
+async def tg_login_phone(message: Message):
+    uid = message.from_user.id
+    if uid not in _tg_login_state or not is_dev(uid):
+        return
+
+    phone = message.text.strip()
+    from telethon_client import start_login
+    sent = await start_login(phone)
+    if not sent.get("success"):
+        await message.answer(f"❌ {sent.get('error', 'Ошибка')}")
+        return
+
+    _tg_login_state[uid] = {"phone": phone, "phone_code_hash": sent["phone_code_hash"]}
+    timeout = sent.get("timeout", 30)
+    await message.answer(
+        f"📱 Код отправлен на {phone}\n"
+        f"Введите код из Telegram (ждёт {timeout} сек):\n\n"
+        f"💡 Если включена 2FA — после кода введите пароль через /setup_tg <пароль>",
+        parse_mode="HTML"
+    )
+
+
+@router.message(Command("setup_tg", F.args))
+async def tg_login_password(message: Message, command: CommandObject):
+    uid = message.from_user.id
+    if uid not in _tg_login_state or not is_dev(uid):
+        return
+    from telethon_client import complete_2fa
+    res = await complete_2fa(command.args)
+    if res.get("success"):
+        await message.answer(f"✅ Telethon авторизован! {res['user']}")
+        del _tg_login_state[uid]
+    else:
+        await message.answer(f"❌ {res.get('error', 'Ошибка')}")
+
+
+@router.message(F.text.regexp(r'^\d{3,6}$'))
+async def tg_login_code(message: Message):
+    uid = message.from_user.id
+    if uid not in _tg_login_state or not is_dev(uid):
+        return
+
+    state = _tg_login_state[uid]
+    from telethon_client import complete_login
+    res = await complete_login(message.text.strip(), state["phone"], state["phone_code_hash"])
+
+    if res.get("success"):
+        await message.answer(f"✅ Telethon авторизован! {res['user']}\nТеперь /tg работает!")
+        del _tg_login_state[uid]
+    elif res.get("need_password"):
+        await message.answer("🔐 Включена 2FA. Введите пароль:\n/setup_tp <пароль>")
+    else:
+        await message.answer(f"❌ {res.get('error', 'Ошибка')}")
+
+
 router.message.register(_cmd_shortcut("tg", "✈️ Введите username или номер телефона Telegram\n"
     "Username: @ivanov\n"
     "Номер: +79991234567\n\n"
@@ -1269,7 +1352,8 @@ async def cmd_help(message: Message):
             "┃ <code>/ip</code> — геолокация IP\n"
             "┃ <code>/domain</code> — инфо по домену\n"
             "┃ <code>/wifi</code> — анализ Wi-Fi (BSSID/SSID/IP)\n"
-            "┃ <code>/tg</code> — Telegram аккаунт (username↔номер)\n"
+            "┃ <code>/tg</code> — Telegram аккаунт (username↔номер, общие группы, сообщения)\n"
+            "┃ <code>/setup_tg</code> — настройка Telethon (вход в аккаунт)\n"
             "┃ <code>/instagram</code> — Instagram профиль\n"
             "┃ <code>/tiktok</code> — TikTok профиль\n"
             "┃ <code>/twitter</code> — Twitter/X профиль\n"
@@ -1540,9 +1624,9 @@ async def osint_text_handler(message: Message):
             chat_id=chat_id,
             message_id=prompt_msg_id,
             parse_mode="HTML",
-            reply_markup=osint_menu_kb(),
+            reply_markup=osint_result_kb(mode, result),
             disable_web_page_preview=True,
         )
     except Exception:
         sent = await message.answer(formatted, parse_mode="HTML", disable_web_page_preview=True)
-        await message.answer("Выберите действие:", reply_markup=osint_menu_kb())
+        await message.answer("Выберите действие:", reply_markup=osint_result_kb(mode, result))

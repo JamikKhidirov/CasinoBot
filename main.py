@@ -15,7 +15,7 @@ from handlers.text_handler import router as text_router
 from handlers.casino import router as casino_router, setup as casino_setup, init_db as casino_init_db
 from handlers.moderation import router as mod_router
 from handlers.developer import router as dev_router
-from telethon_client import close_telethon_client
+from telethon_client import close_telethon_client, try_init_client
 
 PUBLIC_COMMANDS = [
     BotCommand(command="start", description="Главное меню"),
@@ -59,7 +59,8 @@ ADMIN_COMMANDS = [
     BotCommand(command="domain", description="🏛 Инфо домена"),
     BotCommand(command="card", description="💳 Пробив карты"),
     BotCommand(command="wifi", description="📶 Анализ Wi-Fi (BSSID/SSID/IP)"),
-    BotCommand(command="tg", description="✈️ Telegram аккаунт (юзер↔номер)"),
+    BotCommand(command="tg", description="✈️ Telegram аккаунт (юзер↔номер, группы, сообщения)"),
+    BotCommand(command="setup_tg", description="🔧 Настройка Telethon (вход в аккаунт)"),
     BotCommand(command="instagram", description="📸 Instagram профиль"),
     BotCommand(command="tiktok", description="🎵 TikTok профиль"),
     BotCommand(command="twitter", description="🐦 Twitter/X профиль"),
@@ -111,6 +112,10 @@ async def main():
     from aiogram.types import BotCommandScopeDefault, BotCommandScopeChat
 
     OWNER_ID = config.OWNER_ID
+
+    # Telethon init
+    tg_ok, tg_msg = await try_init_client()
+    logger.info(tg_msg)
 
     logger.info("Бот запущен")
 
