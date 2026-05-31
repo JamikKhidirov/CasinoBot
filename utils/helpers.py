@@ -11,6 +11,24 @@ def get_username_safe(user_id: int) -> str:
         return row[1] or row[0] or "unknown"
     except: return "unknown"
 
+def get_user_display(user_id: int) -> str:
+    try:
+        db.cur.execute("SELECT username, nickname FROM users WHERE user_id = ?", (user_id,))
+        row = db.cur.fetchone()
+        if row:
+            username = row[0]
+            nickname = row[1] or ""
+            parts = []
+            if nickname:
+                parts.append(nickname)
+            if username:
+                parts.append(f"@{username}")
+            parts.append(f"<code>{user_id}</code>")
+            return " | ".join(parts)
+        return f"<code>{user_id}</code>"
+    except:
+        return f"<code>{user_id}</code>"
+
 def is_dev(user_id: int) -> bool:
     return user_id == OWNER_ID
 

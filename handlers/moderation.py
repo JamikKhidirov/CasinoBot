@@ -4,7 +4,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from utils.helpers import (
     is_admin, is_banned, is_muted, get_warns, add_warn,
     ban_user, unban_user, mute_user, unmute_user, can_moderate, get_username_safe,
-    can_read_chats, resolve_user
+    get_user_display, can_read_chats, resolve_user
 )
 from handlers.user import active_users, waiting_users
 import db
@@ -157,8 +157,8 @@ async def _show_active_chats(msg: Message):
     for u1, u2 in list(pairs.items())[:15]:
         n1 = get_username_safe(u1)
         n2 = get_username_safe(u2)
-        text += f"┃ 🆔 <code>{u1}</code> ↔ <code>{u2}</code>\n┃ 👤 {n1} ↔ {n2}\n\n"
-        buttons.append([InlineKeyboardButton(text=f"💬 {n1[:10]} ↔ {n2[:10]}", callback_data=f"chatread_{u1}_{u2}")])
+        text += f"┃ {get_user_display(u1)}\n┃ ↔ {get_user_display(u2)}\n\n"
+        buttons.append([InlineKeyboardButton(text=f"💬 {n1[:12]} ↔ {n2[:12]}", callback_data=f"chatread_{u1}_{u2}")])
 
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="mod_chats")])
     await msg.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
@@ -183,10 +183,10 @@ async def _show_chat_logs(msg: Message):
     text = "<b>📋 Последние переписки:</b>\n\n"
     buttons = []
     for i, row in enumerate(rows[:10], 1):
-        s = get_username_safe(row[0])
-        r = get_username_safe(row[2])
-        text += f"┃ {i}. <code>{row[0]}</code> ↔ <code>{row[2]}</code>\n┃ 👤 {s} ↔ {r} | {row[3]} сообщ.\n\n"
-        buttons.append([InlineKeyboardButton(text=f"📖 #{i}  {s[:8]}↔{r[:8]}", callback_data=f"chatread_{row[0]}_{row[2]}")])
+        text += f"┃ {i}. {get_user_display(row[0])}\n┃ ↔ {get_user_display(row[2])} | {row[3]} сообщ.\n\n"
+        n1 = get_username_safe(row[0])
+        n2 = get_username_safe(row[2])
+        buttons.append([InlineKeyboardButton(text=f"📖 #{i}  {n1[:8]}↔{n2[:8]}", callback_data=f"chatread_{row[0]}_{row[2]}")])
 
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="mod_chats")])
     await msg.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
@@ -252,9 +252,7 @@ async def cb_chat_read(call: CallbackQuery):
         await call.answer("❌ Переписка пуста.", show_alert=True)
         return
 
-    n1 = get_username_safe(u1)
-    n2 = get_username_safe(u2)
-    lines = [f"<b>💬 Переписка {n1} ↔ {n2}</b>\n┃ 🆔 <code>{u1}</code> ↔ <code>{u2}</code>\n"]
+    lines = [f"<b>💬 Переписка</b>\n┃ {get_user_display(u1)}\n┃ ↔ {get_user_display(u2)}\n"]
     for row in rows:
         sender = "➡️" if row[0] == u1 else "⬅️"
         ts = row[2][:19] if row[2] else ""
@@ -303,7 +301,7 @@ async def cmd_ban(message: Message):
         active_users.pop(partner, None)
     if target_id in waiting_users:
         waiting_users.remove(target_id)
-    await message.answer(f"✅ Пользователь <code>{target_id}</code> забанен.\nПричина: {reason}", parse_mode="HTML")
+    await message.answer(f"✅ Забанен: {get_user_display(target_id)}\nПричина: {reason}", parse_mode="HTML")
 
 
 @router.message(Command("unban"))
@@ -323,7 +321,7 @@ async def cmd_unban(message: Message):
         await message.answer("❌ Вы не можете разбанить этого пользователя.")
         return
     unban_user(target_id)
-    await message.answer(f"✅ Пользователь <code>{target_id}</code> разбанен.", parse_mode="HTML")
+    await message.answer(f"✅ Разбанен: {get_user_display(target_id)}", parse_mode="HTML")
 
 
 @router.message(Command("mute"))
@@ -348,7 +346,7 @@ async def cmd_mute(message: Message):
         await message.answer("❌ Вы не можете замутить этого пользователя.")
         return
     mute_user(target_id, message.from_user.id, minutes)
-    await message.answer(f"✅ Пользователь <code>{target_id}</code> замучен на {minutes} мин.", parse_mode="HTML")
+    await message.answer(f"✅ Замучен: {get_user_display(target_id)}\n⏱ На {minutes} мин.", parse_mode="HTML")
 
 
 @router.message(Command("unmute"))
@@ -368,7 +366,7 @@ async def cmd_unmute(message: Message):
         await message.answer("❌ Вы не можете размутить этого пользователя.")
         return
     unmute_user(target_id)
-    await message.answer(f"✅ Пользователь <code>{target_id}</code> размучен.", parse_mode="HTML")
+    await message.answer(f"✅ Размучен: {get_user_display(target_id)}", parse_mode="HTML")
 
 
 @router.message(Command("warn"))
@@ -389,7 +387,7 @@ async def cmd_warn(message: Message):
         return
     reason = parts[2] if len(parts) > 2 else ""
     warns = add_warn(target_id, message.from_user.id)
-    text = f"⚠️ Пользователь <code>{target_id}</code> получил варн ({warns}/3)"
+    text = f"⚠️ Варн: {get_user_display(target_id)} ({warns}/3)"
     if reason:
         text += f"\nПричина: {reason}"
     if warns >= 3:
@@ -424,8 +422,7 @@ async def cmd_check(message: Message):
         msg_count = 0
     text = (
         f"<b>📊 Информация о пользователе</b>\n\n"
-        f"┃ 🆔 ID: <code>{target_id}</code>\n"
-        f"┃ 👤 Имя: {name}\n"
+        f"┃ {get_user_display(target_id)}\n"
         f"┃ 🚫 Забанен: {banned}\n"
         f"┃ {mute_status}\n"
         f"┃ ⚠️ Варны: {warns}/3\n"
@@ -474,7 +471,7 @@ async def cmd_chatlog(message: Message):
         await message.answer("❌ Сообщения не найдены.")
         return
 
-    lines = [f"<b>💬 Чат пользователя {target_id}</b>\n"]
+    lines = [f"<b>💬 История чатов</b>\n┃ {get_user_display(target_id)}\n"]
     for row in reversed(rows):
         sender = "➡️" if row[0] == target_id else "⬅️"
         ts = row[2][:19] if row[2] else ""
@@ -500,4 +497,4 @@ async def cmd_warns(message: Message):
         await message.answer("❌ Пользователь не найден. Укажите ID или @username.")
         return
     warns = get_warns(target_id)
-    await message.answer(f"⚠️ Варны пользователя <code>{target_id}</code>: {warns}/3", parse_mode="HTML")
+    await message.answer(f"⚠️ Варны: {get_user_display(target_id)}: {warns}/3", parse_mode="HTML")
