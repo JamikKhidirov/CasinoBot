@@ -1066,6 +1066,7 @@ def _fmt_youtube(data: dict) -> str:
 async def _execute_lookup(message: Message, mode: str, query: str):
     """Выполняет OSINT-поиск и отправляет результат."""
     uid = message.from_user.id
+    result = {}
     if not is_dev(uid) and not is_admin(uid):
         await message.answer("❌ OSINT доступен только администраторам.")
         return
@@ -1206,7 +1207,8 @@ async def _execute_lookup(message: Message, mode: str, query: str):
     import logging
     logger = logging.getLogger(__name__)
     logger.info(f"Ответ OSINT [{mode}] для user={uid}: {formatted[:1500]}")
-    logger.info(f"all_names={result.get('all_names', [])} social_profiles={result.get('social_profiles', {}).get('profiles', [])}" if mode == "phone" else "")
+    if result and mode == "phone":
+        logger.info(f"all_names={result.get('all_names', [])} social_profiles={result.get('social_profiles', {}).get('profiles', [])}")
 
     await message.answer("Выберите действие:", reply_markup=osint_result_kb(mode, result))
 
@@ -1456,6 +1458,7 @@ async def osint_text_handler(message: Message):
     except:
         pass
 
+    result = {}
     try:
         if mode == "phone":
             result = phone_lookup(text)
@@ -1591,7 +1594,8 @@ async def osint_text_handler(message: Message):
     import logging
     logger = logging.getLogger(__name__)
     logger.info(f"Ответ OSINT [{mode}] для user={uid} (text_handler): {formatted[:1500]}")
-    logger.info(f"all_names={result.get('all_names', [])} social_profiles={result.get('social_profiles', {}).get('profiles', [])}" if mode == "phone" else "")
+    if result and mode == "phone":
+        logger.info(f"all_names={result.get('all_names', [])} social_profiles={result.get('social_profiles', {}).get('profiles', [])}")
 
     try:
         await bot.edit_message_text(

@@ -12,8 +12,13 @@ _auth_state: dict = {}  # user_id -> {"phone": str, "phone_code_hash": str, "cli
 
 async def get_telethon_client() -> TelegramClient:
     global _client
+    # Если клиент существует и подключён — проверяем авторизацию
     if _client is not None and _client.is_connected():
-        return _client
+        if await _client.is_user_authorized():
+            return _client
+        # Подключён, но не авторизован — отключаем, создадим новый
+        await _client.disconnect()
+        _client = None
 
     if not TELETHON_API_ID or not TELETHON_API_HASH:
         raise RuntimeError(
@@ -51,10 +56,18 @@ async def try_init_client() -> tuple[bool, str]:
             me = await _client.get_me()
             logger.info(f"Telethon авторизован: {me.first_name} @{me.username}")
             return True, f"✅ Telethon: @{me.username}"
-        else:
-            return False, "ℹ️ Telethon: сессия не найдена. Используйте /setup_tg"
+        # Не авторизован — отключаем, чтобы get_telethon_client не подхватил
+        await _client.disconnect()
+        _client = None
+        return False, "ℹ️ Telethon: сессия не найдена. Используйте /setup_tg"
     except Exception as e:
         logger.warning(f"Telethon init: {e}")
+        if _client:
+            try:
+                await _client.disconnect()
+            except Exception:
+                pass
+            _client = None
         return False, f"⚠️ Telethon: {e}"
 
 
