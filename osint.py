@@ -9,8 +9,6 @@ import asyncio
 import logging
 import warnings
 warnings.filterwarnings("ignore", message=".*verify.*", category=Warning)
-import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
 HTTP_TIMEOUT = 12.0
