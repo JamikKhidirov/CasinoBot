@@ -1123,6 +1123,12 @@ def _fmt_youtube(data: dict) -> str:
 async def _execute_lookup(message: Message, mode: str, query: str):
     """Выполняет OSINT-поиск и отправляет результат."""
     uid = message.from_user.id
+    from aiogram.fsm.context import FSMContext
+    try:
+        st = FSMContext(bot=message.bot, chat_id=message.chat.id, user_id=uid)
+        await st.clear()
+    except Exception:
+        pass
     result = {}
     if not has_osint_access(uid):
         await message.answer("❌ Доступ к OSINT только для администраторов.")
@@ -1286,6 +1292,12 @@ def _cmd_shortcut(mode: str, prompt: str, example: str):
         if not has_osint_access(uid):
             await message.answer("❌ OSINT доступен только администраторам.")
             return
+        from aiogram.fsm.context import FSMContext
+        try:
+            st = FSMContext(bot=message.bot, chat_id=message.chat.id, user_id=uid)
+            await st.clear()
+        except Exception:
+            pass
         if command.args:
             await _execute_lookup(message, mode, command.args)
         else:
@@ -1575,6 +1587,12 @@ async def osint_callback(call: CallbackQuery):
         if not has_osint_access(uid):
             await call.answer("❌ OSINT доступен только администраторам.", show_alert=True)
             return
+        from aiogram.fsm.context import FSMContext
+        try:
+            st = FSMContext(bot=call.bot, chat_id=call.message.chat.id, user_id=uid)
+            await st.clear()
+        except Exception:
+            pass
         msg, mode = prompts[data]
         await call.message.edit_text(msg, parse_mode="HTML")
         osint_waiting[uid] = (mode, call.message.chat.id, call.message.message_id)

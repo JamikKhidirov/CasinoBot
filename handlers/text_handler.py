@@ -40,15 +40,16 @@ async def text_dispatcher(message: Message, state: FSMContext):
         await handle_chat_text(message)
         return
 
-    current_state = await state.get_state()
-    if current_state is not None:
-        return
-
     if uid in osint_waiting:
+        await state.clear()
         await osint_text_handler(message)
         return
 
     if uid in _tg_login_state:
         return  # передаём обработку в osint_handlers
+
+    current_state = await state.get_state()
+    if current_state is not None:
+        return
 
     await message.answer("👋 Нажмите /start для начала.")

@@ -23,9 +23,12 @@ python main.py
 | `handlers/osint_handlers.py` | Обработчики OSINT-команд (меню + ввод) |
 | `handlers/text_handler.py` | Диспетчер текстовых сообщений (OSINT vs чат) |
 | `handlers/user.py` | Хендлер `/start`, состояние `active_users`/`waiting_users` для чата |
-| `handlers/casino.py` | Casino-хендлеры: профиль, игры, ставки, бонусы |
+| `handlers/casino/` | Casino-хендлеры: профиль, игры, ставки, бонусы |
 | `handlers/callbacks.py` | Callback'и чата + казино + общие (back/help) |
 | `handlers/admin.py` | Админ-команды: `/stats` |
+| `handlers/moderation.py` | Модерация: бан, мут, варны, админ-панель |
+| `handlers/developer.py` | Dev-команды: выдача прав, рассылка |
+| `telethon_client.py` | Telethon клиент с WAL-режимом, `get_telethon_client()` |
 | `utils/keyboards.py` | Inline-клавиатуры (главное меню, OSINT, чат, казино) |
 | `utils/helpers.py` | Хелперы: `is_admin`, `is_banned`, `save_message` |
 | `requirements.txt` | `aiogram>=3.12`, `phonenumbers`, `httpx`, `dnspython`, `aiosqlite` |
@@ -41,7 +44,8 @@ python main.py
 - **IP lookup** использует `ip-api.com` (бесплатно, без ключа, 45 запросов/мин с одного IP).
 - **Для email** проверяется формат, MX-записи и Gravatar.
 - **Для домена** — DNS A/AAAA/MX/NS/TXT/SOA + HTTP/HTTPS проверка.
-- **База данных** — SQLite (`chat.db`). Инициализация таблиц при первом запуске.
+- **База данных** — SQLite (`chat.db`, `casino.db`). Инициализация таблиц при первом запуске.
+- **На amvera** БД сохраняются в `/data/` (persistenceMount). Локально — в корне проекта.
 - **Логи** пишутся в `bot_errors.log`.
 - **Ветки**: `master` и `develop`.
 - **OSINT доступен только админам** — скрыт для обычных пользователей.
@@ -49,6 +53,8 @@ python main.py
 - **Эмодзи-бросок**: можно отправить 🎲🏀⚽🎳🎯 в чат с ботом как бросок (помимо кнопок).
 - **Таймер**: на сообщении с игрой отображается обратный отсчёт 30 секунд.
 - **Футбол/баскетбол**: >3 = гол/попадание, ≤3 = промах.
+- **FSM-конфликт**: если активна FSM-сессия казино (ожидание ставки), OSINT-ввод не работал. Исправлено — `text_handler` теперь первым проверяет `osint_waiting` и чистит FSM.
+- **TG OSINT** принимает и username (`@ivanov`), и номер телефона (`+79991234567`), определяя тип автоматически.
 
 ## Команды бота (Telegram)
 
