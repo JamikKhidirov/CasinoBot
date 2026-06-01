@@ -2802,10 +2802,14 @@ async def telegram_account_lookup(input_str: str, user_id: int = 0) -> dict:
         # ==================== РАСШИРЕННЫЕ ДАННЫЕ ====================
 
         def _make_msg_link(chat_entity, msg_id: int) -> str:
-            username = getattr(chat_entity, "username", None)
+            if isinstance(chat_entity, dict):
+                username = chat_entity.get("username")
+                cid = chat_entity.get("id", 0)
+            else:
+                username = getattr(chat_entity, "username", None)
+                cid = getattr(chat_entity, "id", 0)
             if username:
                 return f"https://t.me/{username}/{msg_id}"
-            cid = getattr(chat_entity, "id", 0)
             if cid < 0:
                 cid = -cid
             s = str(cid)

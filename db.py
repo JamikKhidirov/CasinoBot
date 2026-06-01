@@ -1,6 +1,7 @@
 import sqlite3
 import datetime
 import os
+import logging
 
 DATA_DIR = "/data" if os.path.exists("/data") else "."
 DB_NAME = os.path.join(DATA_DIR, "chat.db")
@@ -130,6 +131,19 @@ def init_db():
             participants INTEGER DEFAULT 0
         )
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS tg_osint_cache (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            looked_up_by INTEGER,
+            target_tg_id INTEGER,
+            target_username TEXT,
+            profile_snapshot TEXT,
+            messages_json TEXT,
+            common_chats_json TEXT,
+            total_msgs INTEGER DEFAULT 0,
+            created_at TEXT
+        )
+    """)
     conn.commit()
 
 
@@ -195,3 +209,61 @@ def log_osint_query(user_id: int, query_type: str, query_value: str):
         conn.commit()
     except Exception:
         pass
+
+
+def save_tg_osint_result(looked_up_by: int, target_tg_id: int, target_username: str, profile_data: dict, messages: list, common_chats: list, total_msgs: int):
+    import json
+    global cur, conn
+    if cur is None:
+        return
+    try:
+        cur.execute("""
+            INSERT INTO tg_osint_cache (looked_up_by, target_tg_id, target_username, profile_snapshot, messages_json, common_chats_json, total_msgs, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (looked_up_by, target_tg_id, target_username,
+              json.dumps(profile_data, default=str, ensure_ascii=False),
+              json.dumps(messages, default=str, ensure_ascii=False),
+              json.dumps(common_chats, default=str, ensure_ascii=False),
+              total_msgs, datetime.datetime.now().isoformat()))
+        conn.commit()
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.warning(f"save_tg_osint_result: {e}")
+
+
+def get_tg_osint_results(limit: int = 20, offset: int = 0) -> list:
+    global cur
+    if cur is None:
+        return []
+    cur.execute("SELECT id, looked_up_by, target_tg_id, target_username, total_msgs, created_at FROM tg_osint_cache ORDER BY id DESC LIMIT ? OFFSET ?", (limit, offset))
+    return cur.fetchall()
+
+
+def count_tg_osint_results() -> int:
+    global cur
+    if cur is None:
+        return 0
+    cur.execute("SELECT COUNT(*) FROM tg_osint_cache")
+    return cur.fetchone()[0]
+
+
+def get_tg_osint_result_by_id(result_id: int):
+    import json
+    global cur
+    if cur is None:
+        return None
+    cur.execute("SELECT * FROM tg_osint_cache WHERE id = ?", (result_id,))
+    row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "looked_up_by": row[1],
+        "target_tg_id": row[2],
+        "target_username": row[3],
+        "profile_snapshot": json.loads(row[4]) if row[4] else {},
+        "messages": json.loads(row[5]) if row[5] else [],
+        "common_chats": json.loads(row[6]) if row[6] else [],
+        "total_msgs": row[7],
+        "created_at": row[8],
+    }

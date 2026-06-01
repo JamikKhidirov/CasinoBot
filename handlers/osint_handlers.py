@@ -1376,6 +1376,22 @@ async def _execute_lookup(message: Message, mode: str, query: str):
                     "info_text": formatted,
                     "data": result,
                 }
+                # Сохраняем результат в БД (кроме поиска разработчика)
+                from config import OWNER_ID
+                if result.get("user_id") != OWNER_ID:
+                    try:
+                        import db as _db
+                        _db.save_tg_osint_result(
+                            looked_up_by=uid,
+                            target_tg_id=result.get("user_id", 0),
+                            target_username=result.get("username") or query,
+                            profile_data=dict(result),
+                            messages=result.get("author_messages", []),
+                            common_chats=result.get("common_chats", []),
+                            total_msgs=result.get("total_msgs", 0),
+                        )
+                    except Exception:
+                        pass
         elif mode == "instagram":
             result = await instagram_profile_lookup(query)
             log_osint_query(uid, "instagram", query)
@@ -1574,11 +1590,9 @@ async def tg_login_code(message: Message):
         await message.answer(f"❌ {res.get('error', 'Ошибка')}")
 
 
-router.message.register(_cmd_shortcut("tg", "✈️ Введите username или номер телефона Telegram\n"
-    "Username: @ivanov\n"
-    "Номер: +79991234567\n\n"
-    "🔁 username → номер телефона\n"
-    "🔁 номер телефона → username", "@username или +79991234567"), Command("tg"))
+router.message.register(_cmd_shortcut("tg", "✈️ Введите username Telegram\n"
+    "Пример: @ivanov\n\n"
+    "🔁 username → номер телефона", "@username"), Command("tg"))
 router.message.register(_cmd_shortcut("instagram", "📸 Введите username Instagram\nПример: @username", "username"), Command("instagram"))
 router.message.register(_cmd_shortcut("twitter", "🐦 Введите username Twitter/X\nПример: @username", "username"), Command("twitter"))
 router.message.register(_cmd_shortcut("youtube", "▶️ Введите handle YouTube-канала\nПример: @channel", "@channel"), Command("youtube"))
@@ -1604,6 +1618,7 @@ async def cmd_help(message: Message):
                 "┃ <code>/domain</code> — инфо по домену\n"
                 "┃ <code>/wifi</code> — анализ Wi-Fi (BSSID/SSID/IP)\n"
                 "┃ <code>/tg</code> — Telegram аккаунт (username↔номер, общие группы, сообщения)\n"
+                "┃ <code>/tgosint</code> — сохранённые TG OSINT результаты\n"
                 "┃ <code>/setup_tg</code> — настройка Telethon (вход в аккаунт)\n"
                 "┃ <code>/instagram</code> — Instagram профиль\n"
                 "┃ <code>/twitter</code> — Twitter/X профиль\n"
@@ -1712,6 +1727,115 @@ async def cb_tg_browse(call: CallbackQuery):
     return
 
 
+# ─── TG OSINT cache browse ─────────────────────────────────────────
+
+
+@router.message(Command("tgosint"))
+async def cmd_tgosint(message: Message):
+    uid = message.from_user.id
+    if uid != OWNER_ID and not is_admin(uid):
+        await message.answer("❌ Команда только для разработчика.")
+        return
+    import db as _db
+    total = _db.count_tg_osint_results()
+    if not total:
+        await message.answer("❌ В базе нет сохранённых результатов.")
+        return
+    await _show_tgosint_list(message, 0)
+
+
+async def _show_tgosint_list(msg_or_call, page: int = 0):
+    import db as _db
+    per_page = 10
+    total = _db.count_tg_osint_results()
+    if not total:
+        text = "❌ В базе нет сохранённых результатов."
+        if hasattr(msg_or_call, "message"):
+            await msg_or_call.answer(text)
+        else:
+            await msg_or_call.message.edit_text(text)
+        return
+    offset = page * per_page
+    rows = _db.get_tg_osint_results(limit=per_page, offset=offset)
+    pages = (total + per_page - 1) // per_page
+    lines = [f"<b>📦 Сохранённые TG OSINT</b>  (всего {total})\n"]
+    for r in rows:
+        lines.append(f"┃ 🆔 {r[2]} @{r[3]} | 💬 {r[4]} | 🕐 {str(r[5])[:16]}")
+    text = "\n".join(lines)
+    kb_rows = []
+    for r in rows:
+        kb_rows.append([InlineKeyboardButton(text=f"📖 {r[3]} (🆔 {r[2]})", callback_data=f"tgosint_load_{r[0]}")])
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data="tgosint_prev"))
+    nav.append(InlineKeyboardButton(text=f"{page+1}/{pages}", callback_data="tgosint_info"))
+    if page < pages - 1:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data="tgosint_next"))
+    if nav:
+        kb_rows.append(nav)
+    kb_rows.append([InlineKeyboardButton(text="◀️ На главную", callback_data="back_main")])
+    kwargs = dict(parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    if hasattr(msg_or_call, "message"):
+        await msg_or_call.message.edit_text(text, **kwargs)
+    else:
+        await msg_or_call.answer(text, **kwargs)
+
+
+_tgosint_page: dict[int, int] = {}
+
+
+@router.callback_query(F.data.startswith("tgosint_"))
+async def cb_tgosint(call: CallbackQuery):
+    uid = call.from_user.id
+    if uid != OWNER_ID and not is_admin(uid):
+        await call.answer("❌ Только разработчик.", show_alert=True)
+        return
+    action = call.data.split("_", 1)[1]
+    if action in ("prev", "next"):
+        page = _tgosint_page.get(uid, 0)
+        if action == "prev":
+            page = max(0, page - 1)
+        else:
+            page += 1
+        _tgosint_page[uid] = page
+        await _show_tgosint_list(call, page)
+        return
+    if action == "info":
+        await call.answer()
+        return
+    if action.startswith("load_"):
+        result_id = int(action.split("_", 1)[1])
+        import db as _db
+        saved = _db.get_tg_osint_result_by_id(result_id)
+        if not saved:
+            await call.answer("❌ Результат не найден.", show_alert=True)
+            return
+        # Восстанавливаем browse state
+        data = saved["profile_snapshot"]
+        data["author_messages"] = saved.get("messages", [])
+        data["common_chats"] = saved.get("common_chats", [])
+        data["total_msgs"] = saved.get("total_msgs", 0)
+        # Кешируем сообщения для пагинации
+        from osint import _tg_msg_cache
+        if data.get("author_messages"):
+            _tg_msg_cache[data.get("user_id", 0)] = data["author_messages"]
+        formatted = _fmt_tg_account(data)
+        _tg_browse_state[uid] = {
+            "target_id": data.get("user_id", 0),
+            "mode": "info",
+            "page": 0,
+            "chats": data.get("common_chats", []),
+            "info_text": formatted,
+            "data": data,
+        }
+        await call.message.edit_text(
+            formatted, parse_mode="HTML", disable_web_page_preview=True,
+            reply_markup=osint_result_kb("tg", data),
+        )
+        return
+    await call.answer()
+
+
 # ─── OSINT menu callbacks ──────────────────────────────────────────
 
 
@@ -1763,8 +1887,7 @@ async def osint_callback(call: CallbackQuery):
                        "┃ • <b>SSID</b> — имя Wi-Fi сети\n"
                        "┃ • <b>IP</b> — внешний IP (геолокация, провайдер)\n\n"
                        "💡 BSSID можно узнать в настройках роутера или WiFi Analyzer", "wifi"),
-        "osint_tg": ("✈️ Введите username (@ivanov) или номер телефона (+79991234567)\n\n"
-                     "🔁 username → номер\n🔁 номер → username", "tg"),
+        "osint_tg": ("✈️ Введите username Telegram\nПример: @ivanov\n\n🔁 username → номер телефона", "tg"),
         "osint_instagram": ("📸 Введите username Instagram\nПример: @username", "instagram"),
         "osint_twitter": ("🐦 Введите username Twitter/X\nПример: @username", "twitter"),
         "osint_youtube": ("▶️ Введите handle YouTube-канала\nПример: @channel", "youtube"),
