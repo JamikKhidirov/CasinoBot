@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 class _WALSession(SQLiteSession):
     """SQLite session with WAL mode to prevent 'database is locked'."""
     def __init__(self, session_id=None):
-        self.save_entities = False
         super().__init__(session_id)
+        self.save_entities = False
 
     def _cursor(self):
         if self._conn is None:
@@ -34,38 +34,38 @@ def _make_client() -> TelegramClient:
 
 _client: TelegramClient | None = None
 _auth_state: dict = {}  # user_id -> {"phone": str, "phone_code_hash": str, "client": TelegramClient}
+_client_lock = asyncio.Lock()
 
 
 async def get_telethon_client() -> TelegramClient:
     global _client
-    # Если клиент существует и подключён — проверяем авторизацию
-    if _client is not None and _client.is_connected():
+    async with _client_lock:
+        if _client is not None and _client.is_connected():
+            if await _client.is_user_authorized():
+                return _client
+            await _client.disconnect()
+            _client = None
+
+        if not TELETHON_API_ID or not TELETHON_API_HASH:
+            raise RuntimeError(
+                "Telethon не настроен.\n"
+                "1. Зайдите на https://my.telegram.org/apps\n"
+                "2. Получите API_ID и API_HASH\n"
+                "3. Укажите их в config.py"
+            )
+
+        _client = _make_client()
+        await _client.connect()
+
         if await _client.is_user_authorized():
+            logger.info("Telethon: сессия активна")
             return _client
-        # Подключён, но не авторизован — отключаем, создадим новый
-        await _client.disconnect()
-        _client = None
 
-    if not TELETHON_API_ID or not TELETHON_API_HASH:
         raise RuntimeError(
-            "Telethon не настроен.\n"
-            "1. Зайдите на https://my.telegram.org/apps\n"
-            "2. Получите API_ID и API_HASH\n"
-            "3. Укажите их в config.py"
+            "❌ Telethon не авторизован.\n"
+            "Используйте /setup_tg для входа через бота\n"
+            "или запустите setup_telethon.py вручную"
         )
-
-    _client = _make_client()
-    await _client.connect()
-
-    if await _client.is_user_authorized():
-        logger.info("Telethon: сессия активна")
-        return _client
-
-    raise RuntimeError(
-        "❌ Telethon не авторизован.\n"
-        "Используйте /setup_tg для входа через бота\n"
-        "или запустите setup_telethon.py вручную"
-    )
 
 
 async def try_init_client() -> tuple[bool, str]:
