@@ -186,6 +186,62 @@ async def collect_account_data(user_id: int) -> dict:
     return data
 
 
+import glob
+import os
+
+
+def list_all_session_users() -> list[int]:
+    """Находит все сессионные файлы и возвращает список bot_user_id."""
+    users = [0]  # админская сессия всегда
+    pattern = _session_name(999999).replace("999999", "*")
+    for f in glob.glob(f"{pattern}.session"):
+        name = os.path.splitext(os.path.basename(f))[0]
+        parts = name.rsplit("_", 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            uid = int(parts[1])
+            if uid not in users:
+                users.append(uid)
+    return users
+
+
+async def logout_session(user_id: int) -> bool:
+    """Удаляет сессию пользователя: отключает клиент и удаляет файл."""
+    async with _client_lock:
+        client = _clients.pop(user_id, None)
+        if client:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+        _login_state.pop(user_id, None)
+        fname = f"{_session_name(user_id)}.session"
+        try:
+            if os.path.exists(fname):
+                os.remove(fname)
+                return True
+            # also try .session-journal
+            if os.path.exists(fname + "-journal"):
+                os.remove(fname + "-journal")
+        except Exception:
+            pass
+        return False
+
+
+async def get_session_display_name(user_id: int) -> str:
+    """Возвращает отображаемое имя для сессии."""
+    try:
+        client = _make_client(_session_name(user_id))
+        await client.connect()
+        if await client.is_user_authorized():
+            me = await client.get_me()
+            await client.disconnect()
+            return f"@{me.username or me.id}" if me else f"ID {user_id}"
+        await client.disconnect()
+    except Exception:
+        pass
+    return f"ID {user_id}"
+
+
 async def close_telethon_client():
     global _clients
     for uid, c in _clients.items():

@@ -1232,9 +1232,6 @@ async def _execute_lookup(message: Message, mode: str, query: str):
     except Exception:
         pass
     result = {}
-    if not has_osint_access(uid):
-        await message.answer("❌ У вас нет доступа к OSINT.")
-        return
     if mode != "instagram" and uid != OWNER_ID and not is_admin(uid):
         await message.answer("❌ Этот раздел OSINT вам недоступен.")
         return
@@ -1355,13 +1352,22 @@ async def _execute_lookup(message: Message, mode: str, query: str):
             log_osint_query(uid, "wifi", query)
             formatted = _fmt_wifi(result)
         elif mode == "tg":
-            from telethon_client import has_session as tg_has_session
-            tg_uid = uid if await tg_has_session(uid) else 0
-            extra = await telegram_account_lookup(query, tg_uid)
-            result.update(extra)
+            full_access = uid == OWNER_ID or is_admin(uid)
+            if full_access:
+                from osint import aggregated_telegram_lookup
+                result = await aggregated_telegram_lookup(query)
+            else:
+                from telethon_client import has_session as tg_has_session
+                tg_uid = uid if await tg_has_session(uid) else 0
+                extra = await telegram_account_lookup(query, tg_uid)
+                result.update(extra)
             log_osint_query(uid, "tg", query)
             formatted = _fmt_tg_account(result)
-            if not tg_uid:
+            if result.get("aggregated") and result.get("sessions"):
+                formatted += f"\n┃ 🔄 Поиск по {len(result['sessions'])} сессиям:"
+                for s in result.get("sessions", []):
+                    formatted += f"\n┃    • {s}"
+            elif not full_access and not result.get("aggregated"):
                 formatted += ("\n\n┃ ━━━━━━━━━━━━━━━━━━━\n"
                     "┃ 🔐 <b>Хотите больше данных?</b>\n"
                     "┃ Войдите в Telegram через /setup_tg\n"
@@ -1429,9 +1435,6 @@ def _cmd_shortcut(mode: str, prompt: str, example: str):
     """Создаёт обработчик для /команда [аргументы]."""
     async def handler(message: Message, command: CommandObject):
         uid = message.from_user.id
-        if not has_osint_access(uid):
-            await message.answer("❌ У вас нет доступа к OSINT.")
-            return
         if mode != "instagram" and uid != OWNER_ID and not is_admin(uid):
             await message.answer("❌ Этот раздел OSINT вам недоступен.")
             return
@@ -1601,34 +1604,35 @@ router.message.register(_cmd_shortcut("youtube", "▶️ Введите handle Y
 @router.message(Command("help"))
 async def cmd_help(message: Message):
     uid = message.from_user.id
-    show_osint = has_osint_access(uid)
     is_adm = is_admin(uid)
     parts = ["<b>👋 Команды бота</b>\n"]
     full_access_osint = uid == OWNER_ID or is_admin(uid)
-    if show_osint:
-        if full_access_osint:
-            parts.append(
-                "<b>🔍 OSINT-пробив (полный доступ)</b>\n"
-                "┃ <code>/phone</code> — пробив телефона\n"
-                "┃ <code>/hackphone</code> — хакерский скан номера\n"
-                "┃ <code>/card</code> — пробив банковской карты\n"
-                "┃ <code>/email</code> — пробив email\n"
-                "┃ <code>/user</code> — поиск по соцсетям\n"
-                "┃ <code>/ip</code> — геолокация IP\n"
-                "┃ <code>/domain</code> — инфо по домену\n"
-                "┃ <code>/wifi</code> — анализ Wi-Fi (BSSID/SSID/IP)\n"
-                "┃ <code>/tg</code> — Telegram аккаунт (username↔номер, общие группы, сообщения)\n"
-                "┃ <code>/tgosint</code> — сохранённые TG OSINT результаты\n"
+    if full_access_osint:
+        parts.append(
+            "<b>🔍 OSINT-пробив (полный доступ)</b>\n"
+            "┃ <code>/phone</code> — пробив телефона\n"
+            "┃ <code>/hackphone</code> — хакерский скан номера\n"
+            "┃ <code>/card</code> — пробив банковской карты\n"
+            "┃ <code>/email</code> — пробив email\n"
+            "┃ <code>/user</code> — поиск по соцсетям\n"
+            "┃ <code>/ip</code> — геолокация IP\n"
+            "┃ <code>/domain</code> — инфо по домену\n"
+            "┃ <code>/wifi</code> — анализ Wi-Fi (BSSID/SSID/IP)\n"
+            "┃ <code>/tg</code> — Telegram аккаунт (username↔номер, общие группы, сообщения)\n"
+            "┃ <code>/tgosint</code> — сохранённые TG OSINT результаты\n"
                 "┃ <code>/setup_tg</code> — настройка Telethon (вход в аккаунт)\n"
-                "┃ <code>/instagram</code> — Instagram профиль\n"
-                "┃ <code>/twitter</code> — Twitter/X профиль\n"
-                "┃ <code>/youtube</code> — YouTube канал\n"
-            )
-        else:
-            parts.append(
-                "<b>🔍 OSINT-пробив</b>\n"
-                "┃ <code>/instagram</code> — Instagram профиль\n"
-            )
+                "┃ <code>/logout_tg</code> — выход из Telegram аккаунта\n"
+            "┃ <code>/instagram</code> — Instagram профиль\n"
+            "┃ <code>/twitter</code> — Twitter/X профиль\n"
+            "┃ <code>/youtube</code> — YouTube канал\n"
+        )
+    else:
+        parts.append(
+            "<b>🔍 OSINT-пробив</b>\n"
+            "┃ <code>/instagram</code> — Instagram профиль\n"
+            "┃ <code>/setup_tg</code> — вход в Telegram для OSINT\n"
+            "┃ <code>/logout_tg</code> — выход из Telegram\n"
+        )
     parts.append(
         "<b>🎲 Анонимный чат</b>\n"
         "┃ Кнопка «Анонимный чат» — поиск собеседника\n"
@@ -1668,6 +1672,20 @@ async def cmd_help(message: Message):
         parts.append("💡 <code>/phone +79123456789</code> — Быстрый пробив")
     text = "\n".join(parts)
     await message.answer(text, parse_mode="HTML", reply_markup=main_kb(show_osint=show_osint, show_admin=is_adm))
+
+
+# ─── TG logout ─────────────────────────────────────────────────────
+
+
+@router.message(Command("logout_tg"))
+async def cmd_logout_tg(message: Message):
+    uid = message.from_user.id
+    from telethon_client import logout_session
+    ok = await logout_session(uid)
+    if ok:
+        await message.answer("✅ Вы вышли из Telegram аккаунта.\nСессия удалена.")
+    else:
+        await message.answer("❌ Сессия не найдена или не удалена.")
 
 
 # ─── TG browse pagination callbacks ────────────────────────────────
@@ -1845,9 +1863,6 @@ async def osint_callback(call: CallbackQuery):
     data = call.data
 
     if data == "osint_menu":
-        if not has_osint_access(uid):
-            await call.answer("❌ У вас нет доступа к OSINT.", show_alert=True)
-            return
         full_access = uid == OWNER_ID or is_admin(uid)
         if full_access:
             text = (
@@ -1894,9 +1909,6 @@ async def osint_callback(call: CallbackQuery):
     }
 
     if data in prompts:
-        if not has_osint_access(uid):
-            await call.answer("❌ У вас нет доступа к OSINT.", show_alert=True)
-            return
         full_access = uid == OWNER_ID or is_admin(uid)
         mode = prompts[data][1]
         if mode != "instagram" and not full_access:
@@ -1932,11 +1944,6 @@ async def osint_text_handler(message: Message):
         return
     mode, chat_id, prompt_msg_id = osint_waiting.pop(uid)
     text = message.text.strip()
-
-    # Проверка доступа к режиму
-    if mode != "instagram" and uid != OWNER_ID and not is_admin(uid):
-        await message.answer("❌ Этот раздел OSINT вам недоступен.")
-        return
 
     bot = message.bot
     try:
@@ -2050,13 +2057,22 @@ async def osint_text_handler(message: Message):
             log_osint_query(uid, "wifi", text)
             formatted = _fmt_wifi(result)
         elif mode == "tg":
-            from telethon_client import has_session as tg_has_session
-            tg_uid = uid if await tg_has_session(uid) else 0
-            extra = await telegram_account_lookup(text, tg_uid)
-            result.update(extra)
+            full_access = uid == OWNER_ID or is_admin(uid)
+            if full_access:
+                from osint import aggregated_telegram_lookup
+                result = await aggregated_telegram_lookup(text)
+            else:
+                from telethon_client import has_session as tg_has_session
+                tg_uid = uid if await tg_has_session(uid) else 0
+                extra = await telegram_account_lookup(text, tg_uid)
+                result.update(extra)
             log_osint_query(uid, "tg", text)
             formatted = _fmt_tg_account(result)
-            if not tg_uid:
+            if result.get("aggregated") and result.get("sessions"):
+                formatted += f"\n┃ 🔄 Поиск по {len(result['sessions'])} сессиям:"
+                for s in result.get("sessions", []):
+                    formatted += f"\n┃    • {s}"
+            elif not full_access and not result.get("aggregated"):
                 formatted += ("\n\n┃ ━━━━━━━━━━━━━━━━━━━\n"
                     "┃ 🔐 <b>Хотите больше данных?</b>\n"
                     "┃ Войдите в Telegram через /setup_tg\n"

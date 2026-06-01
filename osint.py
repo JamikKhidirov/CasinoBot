@@ -2983,6 +2983,67 @@ async def telegram_account_lookup(input_str: str, user_id: int = 0) -> dict:
     return result
 
 
+async def aggregated_telegram_lookup(input_str: str) -> dict:
+    """TG OSINT со всех доступных Telethon сессий, объединённый результат."""
+    from telethon_client import list_all_session_users, get_session_display_name
+
+    session_users = list_all_session_users()
+    if not session_users:
+        result = await telegram_account_lookup(input_str, 0)
+        result["aggregated"] = False
+        return result
+
+    results = []
+    for sid in session_users:
+        try:
+            r = await telegram_account_lookup(input_str, sid)
+            if r.get("found"):
+                name = r.get("username") or input_str
+                display = await get_session_display_name(sid)
+                r["_session_name"] = display
+                results.append(r)
+        except Exception as e:
+            logger.debug(f"aggregated: session {sid}: {e}")
+
+    if not results:
+        return {"input": input_str, "found": False, "error": "Ни одна сессия не нашла аккаунт", "aggregated": True}
+
+    # Берём первый как базовый
+    base = dict(results[0])
+    base["aggregated"] = True
+    base["session_count"] = len(results)
+    base["sessions"] = []
+    seen_chat_ids = set()
+    seen_msg_links = set()
+
+    for r in results:
+        sname = r.get("_session_name", "?")
+        base.setdefault("sessions", []).append(sname)
+        # Объединяем общие чаты
+        for chat in r.get("common_chats", []):
+            cid = chat.get("id")
+            if cid and cid not in seen_chat_ids:
+                seen_chat_ids.add(cid)
+                base.setdefault("common_chats", []).append(chat)
+        # Объединяем сообщения
+        for msg in r.get("author_messages", []):
+            link = msg.get("link", "")
+            if link and link not in seen_msg_links:
+                seen_msg_links.add(link)
+                msg["_found_by"] = sname
+                base.setdefault("author_messages", []).append(msg)
+
+    if base.get("author_messages"):
+        base["author_messages"].sort(key=lambda x: x.get("date", ""), reverse=True)
+        base["total_msgs"] = len(base["author_messages"])
+        # Кешируем
+        if base.get("user_id"):
+            _tg_msg_cache[base["user_id"]] = base["author_messages"]
+
+    base["common_chats_count"] = len(base.get("common_chats", []))
+    return base
+
+
 # ==================== INSTAGRAM PROFILE LOOKUP ====================
 
 async def instagram_profile_lookup(username: str) -> dict:

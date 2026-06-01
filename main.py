@@ -34,6 +34,9 @@ PUBLIC_COMMANDS = [
     BotCommand(command="promo", description="🎟 Активировать промокод"),
     BotCommand(command="solo", description="🎮 Соло-казино (только в группах)"),
     BotCommand(command="solotop", description="⭐ Топ с ботом"),
+    BotCommand(command="instagram", description="📸 Instagram профиль"),
+    BotCommand(command="setup_tg", description="✈️ Вход в Telegram для OSINT"),
+    BotCommand(command="logout_tg", description="🚪 Выход из Telegram"),
 ]
 
 ADMIN_COMMANDS = [
