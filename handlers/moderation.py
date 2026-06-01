@@ -4,7 +4,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from utils.helpers import (
     is_admin, is_banned, is_muted, get_warns, add_warn,
     ban_user, unban_user, mute_user, unmute_user, can_moderate, get_username_safe,
-    get_user_display, can_read_chats, resolve_user,
+    get_user_display, can_read_chats, resolve_user, is_dev,
     has_osint_access, grant_osint_access, revoke_osint_access, list_osint_users,
 )
 from handlers.user import active_users, waiting_users
