@@ -25,6 +25,35 @@ router = Router()
 osint_waiting: dict[int, tuple[str, int, int]] = {}  # uid -> (mode, chat_id, prompt_msg_id)
 
 
+def _is_dev_lookup(mode: str, query: str) -> bool:
+    """Проверяет, не пытается ли пользователь пробить разработчика."""
+    from config import OWNER_ID, OWNER_TG, DEV_EMAIL, DEV_PHONE
+    query_lower = query.strip().lower().lstrip("@")
+    # Проверяем по разным типам
+    if mode == "tg":
+        # TG lookup: проверяем по id, username, phone
+        try:
+            if str(OWNER_ID) in query:
+                return True
+        except Exception:
+            pass
+    if query_lower == str(OWNER_ID).lower():
+        return True
+    if hasattr(OWNER_ID, "__str__") and query_lower == str(OWNER_ID):
+        return True
+    # Проверяем по @username разработчика
+    if OWNER_TG and query_lower in (OWNER_TG.lower(), OWNER_TG.lower().lstrip("@")):
+        return True
+    if DEV_EMAIL and query_lower == DEV_EMAIL.lower():
+        return True
+    if DEV_PHONE:
+        clean_q = query.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+        clean_d = DEV_PHONE.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+        if clean_q == clean_d or clean_q.strip("+") == clean_d.strip("+"):
+            return True
+    return False
+
+
 def _fmt_phone(data: dict, full: bool = False) -> str:
     if "error" in data:
         return f"❌ {data['error']}"
@@ -1205,6 +1234,16 @@ async def _execute_lookup(message: Message, mode: str, query: str):
     result = {}
     if not has_osint_access(uid):
         await message.answer("❌ Доступ к OSINT только для администраторов.")
+        return
+
+    # Защита разработчика — блокируем пробив владельца
+    from config import OWNER_ID
+    if uid != OWNER_ID and _is_dev_lookup(mode, query):
+        await message.answer("❌ <b>Босса пробивать запрещено!</b>\n\n"
+                             "┃ Разработчик защищён от OSINT-поиска.\n"
+                             "┃ Ваша попытка залогирована.",
+                             parse_mode="HTML")
+        log_osint_query(uid, f"{mode}_dev_blocked", query)
         return
 
     await message.answer("⏳ Выполняю поиск...")

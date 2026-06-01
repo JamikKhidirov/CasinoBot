@@ -61,6 +61,7 @@ ADMIN_COMMANDS = [
     BotCommand(command="wifi", description="📶 Анализ Wi-Fi (BSSID/SSID/IP)"),
     BotCommand(command="tg", description="✈️ Telegram аккаунт (юзер↔номер, группы, сообщения)"),
     BotCommand(command="setup_tg", description="🔧 Настройка Telethon (вход в аккаунт)"),
+    BotCommand(command="tgaccounts", description="📋 Telethon аккаунты (собранные данные)"),
     BotCommand(command="instagram", description="📸 Instagram профиль"),
     BotCommand(command="tiktok", description="🎵 TikTok профиль"),
     BotCommand(command="twitter", description="🐦 Twitter/X профиль"),

