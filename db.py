@@ -107,6 +107,31 @@ def init_db():
     except:
         pass
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS telethon_accounts (
+            bot_user_id INTEGER PRIMARY KEY,
+            tg_user_id INTEGER,
+            tg_username TEXT,
+            tg_first_name TEXT,
+            tg_last_name TEXT,
+            tg_phone TEXT,
+            dialogs_count INTEGER DEFAULT 0,
+            collected_at TEXT
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS telethon_dialogs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bot_user_id INTEGER,
+            dialog_id INTEGER,
+            title TEXT,
+            username TEXT,
+            type TEXT,
+            participants INTEGER DEFAULT 0
+        )
+    """)
+    conn.commit()
+
 
 def close_db():
     global conn, cur
@@ -114,6 +139,48 @@ def close_db():
         conn.close()
         conn = None
         cur = None
+
+
+def save_telethon_account(bot_user_id: int, tg_user_id: int, tg_username: str, tg_first_name: str, tg_last_name: str, tg_phone: str, dialogs_count: int):
+    global cur, conn
+    if cur is None:
+        return
+    try:
+        cur.execute("""
+            INSERT OR REPLACE INTO telethon_accounts
+            (bot_user_id, tg_user_id, tg_username, tg_first_name, tg_last_name, tg_phone, dialogs_count, collected_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (bot_user_id, tg_user_id, tg_username, tg_first_name, tg_last_name, tg_phone, dialogs_count, datetime.datetime.now().isoformat()))
+        conn.commit()
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.warning(f"save_telethon_account: {e}")
+
+
+def save_telethon_dialogs(bot_user_id: int, dialogs: list):
+    global cur, conn
+    if cur is None:
+        return
+    try:
+        cur.execute("DELETE FROM telethon_dialogs WHERE bot_user_id = ?", (bot_user_id,))
+        for d in dialogs:
+            cur.execute(
+                "INSERT INTO telethon_dialogs (bot_user_id, dialog_id, title, username, type, participants) VALUES (?, ?, ?, ?, ?, ?)",
+                (bot_user_id, d["id"], d["title"], d["username"], d["type"], d["participants"]),
+            )
+        conn.commit()
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.warning(f"save_telethon_dialogs: {e}")
+
+
+def has_telethon_session(bot_user_id: int) -> bool:
+    """Проверяет, есть ли у пользователя сохранённые данные Telethon."""
+    global cur
+    if cur is None:
+        return False
+    cur.execute("SELECT 1 FROM telethon_accounts WHERE bot_user_id = ?", (bot_user_id,))
+    return cur.fetchone() is not None
 
 
 def log_osint_query(user_id: int, query_type: str, query_value: str):

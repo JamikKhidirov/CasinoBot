@@ -2719,18 +2719,18 @@ def clear_tg_msg_cache(user_id: int = None):
         _tg_msg_cache.clear()
 
 
-async def telegram_account_lookup(input_str: str) -> dict:
-    """Telegram аккаунт: username↔номер + все группы + сообщения + медиа + ссылки."""
+async def telegram_account_lookup(input_str: str, user_id: int = 0) -> dict:
+    """Telegram аккаунт: username↔номер + группы + сообщения. user_id=0 = админ."""
     result = {"input": input_str, "found": False, "type": None, "error": None}
 
     try:
         from telethon_client import get_telethon_client
         from telethon.errors import UsernameInvalidError, FloodWaitError
         from telethon.tl.functions.users import GetFullUserRequest
-        from telethon.tl.functions.messages import GetCommonChatsRequest, SearchGlobalRequest, SearchRequest
+        from telethon.tl.functions.messages import GetCommonChatsRequest, SearchRequest
         from telethon.tl.types import InputMessagesFilterEmpty, MessageMediaPhoto, MessageMediaDocument
 
-        client = await get_telethon_client()
+        client = await get_telethon_client(user_id)
 
         text = input_str.strip()
         if text.startswith("@"):
