@@ -974,44 +974,6 @@ def _fmt_tg_account(data: dict) -> str:
             for c in cmds[:5]:
                 lines.append(f"┃   /{c.get('command','')} — {c.get('description','')[:50]}")
 
-    # ─── ОБЩИЕ КАНАЛЫ/ГРУППЫ ───
-    cc = data.get("common_chats", [])
-    if cc:
-        lines.append(f"┃ ═══ 📋 Каналы/группы ({len(cc)}) ═══")
-        for ch in cc[:10]:
-            title = ch.get("title", "")
-            uname = ch.get("username", "")
-            p = ch.get("participants", 0)
-            ct = ch.get("type", "")
-            icon = "📢" if ct == "channel" else "💬"
-            line = f"┃ {icon} {title}"
-            if uname:
-                line += f"  @{uname}"
-            if p:
-                line += f"  👥{p:,}"
-            if ch.get("verified"):
-                line += " ✅"
-            if ch.get("scam"):
-                line += " ⚠️"
-            lines.append(line)
-
-    # ─── СООБЩЕНИЯ ПОЛЬЗОВАТЕЛЯ В ГРУППАХ ───
-    author_msgs = data.get("author_messages", [])
-    if author_msgs:
-        lines.append(f"┃ ═══ ✏️ Сообщения ({len(author_msgs)}) ═══")
-        for m in author_msgs[:15]:
-            chat = m.get("chat", "?")
-            link = m.get("link", "")
-            txt = (m.get("text", "") or "")[:80]
-            mt = m.get("media_type", "text")
-            icon = {"voice":"🎤","photo":"📸","video":"🎬","audio":"🎵","document":"📄"}.get(mt, "💬")
-            line = f"┃ {icon}[{chat}]"
-            if txt:
-                line += f" {txt}"
-            if link:
-                line += f"  <a href='{link}'>🔗</a>"
-            lines.append(line)
-
     return "\n".join(lines)
 
 
