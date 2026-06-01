@@ -2,7 +2,7 @@ import asyncio
 import re
 from aiogram import Router, F
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from utils.keyboards import main_kb, osint_menu_kb, osint_result_kb
 from utils.helpers import is_admin, is_dev, has_osint_access
 from config import OWNER_ID
