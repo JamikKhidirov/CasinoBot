@@ -1469,6 +1469,9 @@ async def _after_tg_login(uid: int, bot, me):
                 f"┃ 💬 Диалогов собрано: <b>{data['dialogs_count']}</b>\n"
                 f"┃ 🕐 {datetime.now().strftime('%Y-%m-%d %H:%M')}",
                 parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📋 Подробнее", callback_data=f"tgadialog_{uid}")],
+                ]),
             )
         except Exception:
             pass
