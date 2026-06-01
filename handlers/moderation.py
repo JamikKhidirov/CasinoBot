@@ -638,10 +638,10 @@ async def cb_tgaccounts_dialogs(call: CallbackQuery):
         return
     buttons = []
     for a in accounts:
-        name = f"@{a['tg_username']}" if a['tg_username'] else a['tg_first_name']
+        name = f"@{a[1]}" if a[1] else a[2]
         buttons.append([InlineKeyboardButton(
             text=f"👤 {name}",
-            callback_data=f"tgadialog_{a['bot_user_id']}"
+            callback_data=f"tgadialog_{a[0]}"
         )])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")])
     await call.message.edit_text(
@@ -666,14 +666,14 @@ async def cb_tgaccount_dialog_detail(call: CallbackQuery):
     if not dialogs:
         await call.answer("❌ Нет диалогов.", show_alert=True)
         return
-    name = f"@{acc['tg_username']}" if acc and acc['tg_username'] else (acc['tg_first_name'] if acc else str(bot_uid))
+    name = f"@{acc[0]}" if acc and acc[0] else (acc[1] if acc else str(bot_uid))
     lines = [f"<b>📋 Диалоги {name}</b>  ({len(dialogs)})\n"]
     for d in dialogs:
-        title = d['title'] or "?"
-        uname = d['username'] or ""
-        typ = d['type']
+        title = d[3] or "?"
+        uname = d[4] or ""
+        typ = d[5]
         icon = {"user": "👤", "group": "💬", "channel": "📢"}.get(typ, "❓")
-        parts = d['participants'] or 0
+        parts = d[6] or 0
         line = f"┃ {icon} {title}"
         if uname:
             line += f" @{uname}"
