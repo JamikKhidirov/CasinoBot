@@ -79,7 +79,7 @@ def osint_result_kb(mode: str, data: dict = None):
     if mode == "tg" and data:
         total = data.get("total_msgs", 0)
         cc = data.get("common_chats", [])
-        voice = sum(1 for m in (data.get("public_messages", []) + data.get("author_messages", [])) if m.get("has_voice"))
+        voice = sum(1 for m in data.get("author_messages", []) if m.get("has_voice"))
         nav = []
         if total:
             nav.append(InlineKeyboardButton(text=f"💬 Сообщения ({total})", callback_data="tg_browse_msgs"))

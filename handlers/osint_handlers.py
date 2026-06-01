@@ -867,30 +867,132 @@ def _fmt_tg_account(data: dict) -> str:
         return f"❌ {data['error']}"
     if not data.get("found"):
         return f"❌ Аккаунт не найден"
-    lines = [f"<b>✈️ Telegram — @{data.get('username') or data['input']}</b>"]
-    if data.get("first_name") or data.get("last_name"):
-        lines.append(f"┃ 👤 {data.get('first_name','')} {data.get('last_name','')}".strip())
+
+    display_name = data.get("username") or data["input"]
+    lines = [f"<b>✈️ Telegram — @{display_name}</b>"]
+
+    # ─── ОСНОВНАЯ ИНФОРМАЦИЯ ───
+    full_name = f"{data.get('first_name','')} {data.get('last_name','')}".strip()
+    if full_name:
+        lines.append(f"┃ 👤 <b>{full_name}</b>")
     lines.append(f"┃ 🆔 <code>{data['user_id']}</code>")
     if data.get("phone"):
-        lines.append(f"┃ 📱 <code>{data['phone']}</code>")
+        lines.append(f"┃ 📱 +{data['phone']}")
     if data.get("bio"):
-        lines.append(f"┃ 📝 {data['bio'][:200]}")
-    if data.get("common_chats_count"):
-        lines.append(f"┃ 👥 Общих групп: <b>{data['common_chats_count']}</b>")
-    tags = []
-    if data.get("premium"): tags.append("⭐")
-    if data.get("verified"): tags.append("✅")
-    if data.get("bot"): tags.append("🤖")
-    if data.get("scam"): tags.append("⚠️")
-    if tags:
-        lines.append(f"┃ {' '.join(tags)}")
+        lines.append(f"┃ 📝 <i>{data['bio'][:300]}</i>")
+    lines.append(f"┃ ━━━━━━━━━━━━━━━━━━━")
 
-    # ─── Общие каналы/группы (первые 10) ───
+    # ─── ТЕГИ / СТАТУСЫ ───
+    tags = []
+    if data.get("premium"): tags.append("⭐ Premium")
+    if data.get("verified"): tags.append("✅ Верифицирован")
+    if data.get("bot"): tags.append("🤖 Бот")
+    if data.get("scam"): tags.append("⚠️ Скам")
+    if data.get("fake"): tags.append("🎭 Фейк")
+    if data.get("support"): tags.append("🛠 Поддержка Telegram")
+    if data.get("deleted"): tags.append("🗑 Удалён")
+    if data.get("restricted"): tags.append("🔒 Ограничен")
+    if tags:
+        lines.append(f"┃ {' | '.join(tags)}")
+    if data.get("status"):
+        status_icon = {"UserStatusOnline": "🟢", "UserStatusOffline": "⚫", "UserStatusRecently": "🟡", "UserStatusLastWeek": "🟤", "UserStatusLastMonth": "🔴"}
+        emoji = next((v for k, v in status_icon.items() if k in data["status"]), "❓")
+        lines.append(f"┃ {emoji} Статус: {data['status']}")
+    if data.get("close_friend"):
+        lines.append(f"┃ 💞 Близкий друг")
+    if data.get("contact"):
+        lines.append(f"┃ 📇 В контактах")
+    if data.get("mutual_contact"):
+        lines.append(f"┃ 🤝 Взаимный контакт")
+
+    # ─── СТАТИСТИКА ───
+    stats = []
+    if data.get("common_chats_count") is not None:
+        stats.append(f"👥 {data['common_chats_count']} общих групп")
+    if data.get("lang_code"):
+        stats.append(f"🌐 {data['lang_code']}")
+    if data.get("dc_id"):
+        stats.append(f"📡 DC{data['dc_id']}")
+    if stats:
+        lines.append(f"┃ {' | '.join(stats)}")
+
+    # ─── ЗВОНКИ И СООБЩЕНИЯ ───
+    call_flags = []
+    if data.get("phone_calls_available"): call_flags.append("📞 Звонки разрешены")
+    if data.get("phone_calls_private"): call_flags.append("🔒 Скрывает номер")
+    if data.get("video_calls_available"): call_flags.append("📹 Видеозвонки")
+    if data.get("voice_messages_forbidden"): call_flags.append("🚫 Голосовые запрещены")
+    if call_flags:
+        lines.append(f"┃ {' | '.join(call_flags)}")
+
+    # ─── БЛОКИРОВКИ ───
+    block_flags = []
+    if data.get("blocked_by_me"): block_flags.append("🚫 Заблокирован мной")
+    if data.get("blocked_by_user"): block_flags.append("🚫 Заблокировал меня")
+    if data.get("can_pin_message"): block_flags.append("📌 Может закреплять")
+    if data.get("can_view_pinned_msg"): block_flags.append("📌 Есть закреп")
+    if data.get("has_scheduled"): block_flags.append("📅 Есть отложенные")
+    if block_flags:
+        lines.append(f"┃ {' | '.join(block_flags)}")
+
+    # ─── ДОПОЛНИТЕЛЬНО ───
+    extra = []
+    if data.get("ttl_period"):
+        extra.append(f"⏳ TTL: {data['ttl_period']}с")
+    if data.get("restriction_reason"):
+        extra.append(f"⛔ Причина блокировки: {', '.join(data['restriction_reason'])}")
+    if data.get("private_forward_name"):
+        extra.append(f"🔐 Пересылка: {data['private_forward_name']}")
+    if data.get("stories_pinned_available"):
+        extra.append(f"📌 Есть закрепленные истории")
+    if data.get("stories_unavailable"):
+        extra.append(f"🚫 Истории недоступны")
+    if data.get("stories_max_id"):
+        extra.append(f"📸 Есть истории")
+    if data.get("color"):
+        extra.append(f"🎨 Цвет профиля: {data['color']}")
+    if extra:
+        lines.append(f"┃ {' | '.join(extra)}")
+
+    # ─── СТИКЕРСЕТ И ТЕМА ───
+    if data.get("stickerset"):
+        ss = data["stickerset"]
+        lines.append(f"┃ 🎭 Набор стикеров: {ss.get('title', '')}")
+    if data.get("theme_emoji"):
+        lines.append(f"┃ 🎨 Эмодзи темы: {data['theme_emoji']}")
+
+    # ─── ФОТО ───
+    if data.get("has_profile_photo"):
+        lines.append(f"┃ 🖼 Аватар: есть" + (f" (DC{data.get('photo_big', '?')})" if data.get("photo_big") else ""))
+    if data.get("personal_photo"):
+        lines.append(f"┃ 🖼 Личное фото: есть")
+
+    # ─── БОТЫ ───
+    if data.get("bot"):
+        if data.get("bot_description"):
+            lines.append(f"┃ 📝 Описание бота: {data['bot_description'][:200]}")
+        if data.get("bot_pack_shortname"):
+            lines.append(f"┃ 🎭 Стикерпак: {data['bot_pack_shortname']}")
+        cmds = data.get("bot_commands", [])
+        if cmds:
+            lines.append(f"┃ 📋 Команды ({len(cmds)}):")
+            for c in cmds[:10]:
+                lines.append(f"┃   /{c.get('command', '')} — {c.get('description', '')}")
+        if data.get("bot_nochats"):
+            lines.append(f"┃ 🚫 Не принимается в группы")
+
+    # ─── ТИП ПОИСКА ───
+    if data.get("found_by") == "phone_to_username":
+        lines.append(f"┃ 🔁 Номер → Юзернейм")
+    elif data.get("found_by") == "username_to_phone":
+        lines.append(f"┃ 🔁 Юзернейм → Номер")
+
+    # ─── ОБЩИЕ КАНАЛЫ/ГРУППЫ ───
     cc = data.get("common_chats", [])
     if cc:
         lines.append(f"┃ ═══════════════════════════")
-        lines.append(f"┃ <b>📋 Каналы/группы ({len(cc)}):</b>")
-        for ch in cc[:10]:
+        lines.append(f"┃ <b>📋 Общие каналы/группы ({len(cc)}):</b>")
+        for ch in cc[:15]:
             title = ch.get("title", "")
             uname = ch.get("username", "")
             p = ch.get("participants", 0)
@@ -901,27 +1003,18 @@ def _fmt_tg_account(data: dict) -> str:
                 line += f"  <a href='https://t.me/{uname}'>@{uname}</a>"
             if p:
                 line += f"  👥 {p:,}"
+            if ch.get("verified"):
+                line += " ✅"
+            if ch.get("scam"):
+                line += " ⚠️"
             lines.append(line)
 
-    # ─── Сообщения пользователя в группах (первые 5) ───
+    # ─── СООБЩЕНИЯ ПОЛЬЗОВАТЕЛЯ В ГРУППАХ ───
     author_msgs = data.get("author_messages", [])
     if author_msgs:
         lines.append(f"┃ ═══════════════════════════")
         lines.append(f"┃ <b>✏️ Сообщения пользователя ({len(author_msgs)}):</b>")
         for m in author_msgs[:5]:
-            chat = m.get("chat", "?")
-            link = m.get("link", "")
-            txt = (m.get("text", "") or "")[:100]
-            lines.append(f"┃  💬 [{chat}] {txt}")
-            if link:
-                lines.append(f"┃    <a href='{link}'>🔗 Ссылка</a>")
-
-    # ─── Упоминания в публичных чатах (первые 5) ───
-    pub = data.get("public_messages", [])
-    if pub:
-        lines.append(f"┃ ═══════════════════════════")
-        lines.append(f"┃ <b>📰 Упоминания ({len(pub)}):</b>")
-        for m in pub[:5]:
             chat = m.get("chat", "?")
             link = m.get("link", "")
             txt = (m.get("text", "") or "")[:100]
@@ -1053,8 +1146,36 @@ def _fmt_instagram(data: dict) -> str:
         lines.append(f"┃ {' | '.join(tags)}")
     if data.get("business_category"):
         lines.append(f"┃ 🏢 Категория: {data['business_category']}")
+    if data.get("business_email"):
+        lines.append(f"┃ 📧 Email: <code>{data['business_email']}</code>")
+    if data.get("business_phone"):
+        lines.append(f"┃ 📞 Телефон: <code>{data['business_phone']}</code>")
     if data.get("external_url"):
         lines.append(f"┃ 🔗 Ссылка: <code>{data['external_url']}</code>")
+    if data.get("total_igtv_videos"):
+        lines.append(f"┃ 📺 IGTV видео: <b>{data['total_igtv_videos']}</b>")
+    if data.get("profile_url"):
+        lines.append(f"┃ 🔗 Профиль: <a href='{data['profile_url']}'>Открыть</a>")
+
+    # Последние посты
+    posts = data.get("recent_posts", [])
+    if posts:
+        lines.append(f"┃ ═══════════════════════════")
+        lines.append(f"┃ <b>📷 Последние посты ({len(posts)}):</b>")
+        for p in posts[:5]:
+            caption = (p.get("caption", "") or "")[:120]
+            likes = p.get("likes", 0)
+            comments = p.get("comments", 0)
+            icon = "🎬" if p.get("is_video") else "📷"
+            views = ""
+            if p.get("is_video") and p.get("video_views"):
+                views = f" 👁 {p['video_views']:,}"
+            lines.append(f"┃ {icon} ♥ {likes:,} 💬 {comments}{views}")
+            if caption:
+                lines.append(f"┃    {caption}")
+            url = p.get("url", "")
+            if url:
+                lines.append(f"┃    <a href='{url}'>🔗 Ссылка</a>")
     return "\n".join(lines)
 
 

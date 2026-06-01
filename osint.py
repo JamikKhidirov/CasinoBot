@@ -2728,7 +2728,7 @@ async def telegram_account_lookup(input_str: str) -> dict:
         from telethon.errors import UsernameInvalidError, FloodWaitError
         from telethon.tl.functions.users import GetFullUserRequest
         from telethon.tl.functions.messages import GetCommonChatsRequest, SearchGlobalRequest, SearchRequest
-        from telethon.tl.types import InputMessagesFilterEmpty, InputPeerEmpty, MessageMediaPhoto, MessageMediaDocument
+        from telethon.tl.types import InputMessagesFilterEmpty, MessageMediaPhoto, MessageMediaDocument
 
         client = await get_telethon_client()
 
@@ -2757,6 +2757,7 @@ async def telegram_account_lookup(input_str: str) -> dict:
         result["found"] = True
         result["type"] = "phone" if is_phone else "username"
         result["user_id"] = entity.id
+        result["access_hash"] = getattr(entity, "access_hash", None)
         result["username"] = entity.username
         result["first_name"] = entity.first_name or ""
         result["last_name"] = entity.last_name or ""
@@ -2767,9 +2768,17 @@ async def telegram_account_lookup(input_str: str) -> dict:
         result["scam"] = getattr(entity, "scam", False)
         result["fake"] = getattr(entity, "fake", False)
         result["restricted"] = getattr(entity, "restricted", False)
-
-        if hasattr(entity, "status") and entity.status:
-            result["status"] = str(entity.status)
+        result["deleted"] = getattr(entity, "deleted", False)
+        result["support"] = getattr(entity, "support", False)
+        result["contact"] = getattr(entity, "contact", False)
+        result["mutual_contact"] = getattr(entity, "mutual_contact", False)
+        result["close_friend"] = getattr(entity, "close_friend", False)
+        result["lang_code"] = getattr(entity, "lang_code", None)
+        result["dc_id"] = getattr(entity, "dc_id", None)
+        result["stories_unavailable"] = getattr(entity, "stories_unavailable", None)
+        result["bot_nochats"] = getattr(entity, "bot_nochats", False)
+        result["stories_max_id"] = getattr(entity, "stories_max_id", None)
+        result["min"] = getattr(entity, "min", False)
 
         if is_phone and entity.username:
             result["found_by"] = "phone_to_username"
@@ -2777,6 +2786,18 @@ async def telegram_account_lookup(input_str: str) -> dict:
             result["found_by"] = "username_to_phone"
         else:
             result["found_by"] = "general"
+
+        if hasattr(entity, "status") and entity.status:
+            result["status"] = str(entity.status)
+
+        # Ограничения (restriction_reason)
+        if hasattr(entity, "restriction_reason") and entity.restriction_reason:
+            result["restriction_reason"] = [str(r) for r in entity.restriction_reason]
+
+        # Цвет профиля (Telegram accent color)
+        if hasattr(entity, "color") and entity.color:
+            result["color"] = getattr(entity.color, "id", None)
+            result["color_background"] = getattr(entity.color, "background_emoji_id", None)
 
         # ==================== РАСШИРЕННЫЕ ДАННЫЕ ====================
 
@@ -2818,8 +2839,49 @@ async def telegram_account_lookup(input_str: str) -> dict:
                 result["has_profile_photo"] = getattr(fu, "profile_photo", None) is not None
                 result["personal_photo"] = getattr(fu, "personal_photo", None) is not None
                 result["ttl_period"] = getattr(fu, "ttl_period", None)
+                result["blocked_by_me"] = getattr(fu, "blocked", False) or getattr(fu, "is_blocked_by_me", False)
+                result["blocked_by_user"] = getattr(fu, "is_blocked_by_user", False)
+                result["phone_calls_available"] = getattr(fu, "phone_calls_available", False)
+                result["phone_calls_private"] = getattr(fu, "phone_calls_private", False)
+                result["video_calls_available"] = getattr(fu, "video_calls_available", False)
+                result["voice_messages_forbidden"] = getattr(fu, "voice_messages_forbidden", False)
+                result["can_pin_message"] = getattr(fu, "can_pin_message", False)
+                result["can_view_pinned_msg"] = getattr(fu, "can_view_pinned_msg", False)
+                result["has_scheduled"] = getattr(fu, "has_scheduled", False)
+                result["private_forward_name"] = getattr(fu, "private_forward_name", None)
+                result["stories_pinned_available"] = getattr(fu, "stories_pinned_available", False)
+                result["translate_anonymous"] = getattr(fu, "translate_anonymous", False)
+                result["wallpaper_overridden"] = getattr(fu, "wallpaper_overridden", False)
+
+                result["photo_big"] = None
+                if hasattr(fu, "profile_photo") and fu.profile_photo:
+                    result["photo_big"] = getattr(fu.profile_photo, "dc_id", None)
+
+                # Стикерсет
+                if hasattr(fu, "stickerset") and fu.stickerset:
+                    ss = fu.stickerset
+                    result["stickerset"] = {
+                        "id": getattr(ss, "id", None),
+                        "title": getattr(ss, "title", None),
+                        "short_name": getattr(ss, "short_name", None),
+                    }
+
+                # Тема эмодзи
+                if hasattr(fu, "theme_emoji") and fu.theme_emoji:
+                    result["theme_emoji"] = fu.theme_emoji
+
+                # Bot info
                 if hasattr(fu, "bot_info") and fu.bot_info:
-                    result["bot_description"] = getattr(fu.bot_info, "description", "")
+                    bi = fu.bot_info
+                    result["bot_description"] = getattr(bi, "description", "")
+                    result["bot_pack_shortname"] = getattr(bi, "bot_pack_shortname", "")
+                    result["bot_commands"] = []
+                    if hasattr(bi, "commands") and bi.commands:
+                        for cmd in bi.commands:
+                            result["bot_commands"].append({
+                                "command": getattr(cmd, "command", ""),
+                                "description": getattr(cmd, "description", ""),
+                            })
             except Exception as e:
                 logger.debug(f"GetFullUserRequest: {e}")
 
@@ -2846,7 +2908,7 @@ async def telegram_account_lookup(input_str: str) -> dict:
                 logger.debug(f"GetCommonChats: {e}")
 
         async def search_author_messages():
-            """Ищет сообщения, отправленные пользователем в общих чатах."""
+            """Ищет сообщения, отправленные пользователем во ВСЕХ общих чатах."""
             from telethon.tl.types import InputPeerChannel
 
             chats = result.get("common_chats", [])
@@ -2856,7 +2918,7 @@ async def telegram_account_lookup(input_str: str) -> dict:
             author_msgs = []
             seen_links_a = set()
 
-            for chat_info in chats[:10]:
+            for chat_info in chats:  # все общие чаты, не только первые 10
                 cid = chat_info["id"]
                 try:
                     peer = InputPeerChannel(cid, 0)
@@ -2880,6 +2942,7 @@ async def telegram_account_lookup(input_str: str) -> dict:
                             author_msgs.append({
                                 "chat": chat_info.get("title", ""),
                                 "chat_username": chat_info.get("username", ""),
+                                "chat_id": cid,
                                 "text": text,
                                 "link": link,
                                 "media_type": mt,
@@ -2887,91 +2950,23 @@ async def telegram_account_lookup(input_str: str) -> dict:
                                 "date": str(getattr(msg, "date", ""))[:19],
                                 "msg_id": msg.id,
                             })
+                            if mt == "voice" and msg.media and hasattr(msg.media, "voice") and msg.media.voice:
+                                author_msgs[-1]["voice_duration"] = getattr(msg.media.voice, "duration", 0)
+                                author_msgs[-1]["voice_id"] = msg.media.voice.id
                 except Exception as e:
                     logger.debug(f"SearchRequest(chat={cid}): {e}")
 
             author_msgs.sort(key=lambda x: x.get("date", ""), reverse=True)
             if author_msgs:
-                result["author_messages"] = author_msgs[:50]
+                result["author_messages"] = author_msgs
+                result["total_msgs"] = len(author_msgs)
 
-        async def search_public_messages():
-            """Ищет сообщения с упоминанием пользователя (username/имя) в публичных чатах."""
-            queries = []
-            if entity.username:
-                queries.append(f"@{entity.username}")
-            if is_phone and len(clean) >= 7:
-                queries.append(clean)
-            if entity.first_name:
-                queries.append(entity.first_name)
+        await asyncio.gather(get_full_user(), get_common_chats(), search_author_messages())
 
-            all_msgs = []
-            seen_links = set()
-
-            for q in queries:
-                if not q or len(q) < 2:
-                    continue
-                try:
-                    search = await client(SearchGlobalRequest(
-                        q=q, filter=InputMessagesFilterEmpty(),
-                        min_date=None, max_date=None,
-                        offset_rate=0, offset_peer=InputPeerEmpty(),
-                        offset_id=0, limit=10,
-                    ))
-                    if hasattr(search, "messages") and search.messages:
-                        for msg in search.messages:
-                            try:
-                                chat_entity = await client.get_entity(msg.peer_id)
-                            except:
-                                continue
-                            link = _make_msg_link(chat_entity, msg.id)
-                            if link in seen_links:
-                                continue
-                            seen_links.add(link)
-
-                            chat_title = getattr(chat_entity, "title", "") or getattr(chat_entity, "username", "") or str(chat_entity.id)
-                            chat_username = getattr(chat_entity, "username", "")
-                            mt = _media_type(msg)
-                            text = (msg.text or "")[:300]
-
-                            entry = {
-                                "chat": chat_title,
-                                "chat_username": chat_username,
-                                "text": text,
-                                "link": link,
-                                "media_type": mt,
-                                "has_voice": mt == "voice",
-                                "date": str(getattr(msg, "date", ""))[:19],
-                                "msg_id": msg.id,
-                            }
-
-                            if mt == "voice" and msg.media and hasattr(msg.media, "voice") and msg.media.voice:
-                                entry["voice_duration"] = getattr(msg.media.voice, "duration", 0)
-                                entry["voice_id"] = msg.media.voice.id
-
-                            all_msgs.append(entry)
-                except Exception as e:
-                    logger.debug(f"SearchGlobal(q={q}): {e}")
-
-            all_msgs.sort(key=lambda x: x.get("date", ""), reverse=True)
-            if all_msgs:
-                result["public_messages"] = all_msgs[:20]
-
-        await asyncio.gather(get_full_user(), get_common_chats(), search_public_messages(), search_author_messages())
-
-        # Кешируем все сообщения для пагинации
-        all_found = []
-        all_found.extend(result.get("public_messages", []))
-        all_found.extend(result.get("author_messages", []))
-        seen = set()
-        deduped = []
-        for m in all_found:
-            if m.get("link") and m["link"] not in seen:
-                seen.add(m["link"])
-                deduped.append(m)
-        deduped.sort(key=lambda x: x.get("date", ""), reverse=True)
-        if deduped:
-            _tg_msg_cache[entity.id] = deduped
-            result["total_msgs"] = len(deduped)
+        # Кешируем сообщения для пагинации
+        msgs = result.get("author_messages", [])
+        if msgs:
+            _tg_msg_cache[entity.id] = msgs
             result["msg_offset"] = 0
             result["msg_page_size"] = _tg_page_size
 
@@ -2987,7 +2982,7 @@ async def telegram_account_lookup(input_str: str) -> dict:
 # ==================== INSTAGRAM PROFILE LOOKUP ====================
 
 async def instagram_profile_lookup(username: str) -> dict:
-    """Instagram — детальный профиль по username через публичные источники."""
+    """Instagram — детальный профиль по username через публичный HTML + встроенные JSON."""
     username = username.strip().lstrip("@")
     result = {"input": username, "found": False, "error": None}
 
@@ -2996,26 +2991,107 @@ async def instagram_profile_lookup(username: str) -> dict:
             headers = {"User-Agent": USER_AGENT, "Accept-Language": "en"}
             r = await c.get(f"https://www.instagram.com/{username}/", headers=headers)
 
-            if r.status_code == 200 and "The link you followed may be broken" not in r.text:
-                text = r.text
-                result["found"] = True
+            if r.status_code != 200 or "The link you followed may be broken" in r.text:
+                result["error"] = "Пользователь не найден или Instagram заблокировал запрос"
+                return result
 
-                m = re.search(r'<meta[^>]*property="og:title"[^>]*content="([^"]+)"', text)
-                if m:
-                    result["full_name"] = m.group(1)
+            text = r.text
+            result["found"] = True
+            result["profile_url"] = f"https://www.instagram.com/{username}/"
 
-                m = re.search(r'<meta[^>]*property="og:description"[^>]*content="([^"]+)"', text)
-                if m:
-                    desc = m.group(1)
+            og_title = re.search(r'<meta[^>]*property="og:title"[^>]*content="([^"]+)"', text)
+            if og_title:
+                result["full_name"] = og_title.group(1)
+
+            og_img = re.search(r'<meta[^>]*property="og:image"[^>]*content="([^"]+)"', text)
+            if og_img:
+                result["profile_pic"] = og_img.group(1)
+
+            # Парсим JSON из <script type="text/javascript">window.__INITIAL_STATE__=...
+            json_data = None
+            m_json = re.search(r'window\.__INITIAL_STATE__\s*=\s*({.*?});\s*</script>', text, re.DOTALL)
+            if m_json:
+                try:
+                    import json
+                    json_data = json.loads(m_json.group(1))
+                except Exception:
+                    pass
+
+            if json_data:
+                user_data = (json_data.get("settings", {})
+                             .get("profile", {})
+                             .get("user", {})
+                             .get(username, {}))
+                if not user_data:
+                    user_data = json_data.get("profile_user", {})
+
+                if user_data:
+                    result["full_name"] = user_data.get("full_name", result.get("full_name", ""))
+                    result["biography"] = user_data.get("biography", "")[:500]
+                    result["follower_count"] = user_data.get("follower_count", 0)
+                    result["following_count"] = user_data.get("following_count", 0)
+                    result["media_count"] = user_data.get("media_count", 0)
+                    result["is_private"] = user_data.get("is_private", False)
+                    result["is_verified"] = user_data.get("is_verified", False)
+                    result["is_business"] = user_data.get("is_business_account", False)
+                    result["business_category"] = user_data.get("business_category_name", "")
+                    result["external_url"] = user_data.get("external_url", "")
+                    result["profile_pic"] = user_data.get("profile_pic_url_hd", "") or result.get("profile_pic", "")
+                    result["is_joined_recently"] = user_data.get("is_joined_recently", False)
+                    result["has_highlight_reels"] = user_data.get("has_highlight_reels", False)
+                    result["has_guides"] = user_data.get("has_guides", False)
+                    result["has_channel"] = user_data.get("has_channel", False)
+                    result["total_igtv_videos"] = user_data.get("total_igtv_videos", 0)
+
+                    # email из бизнес-профиля (если есть)
+                    result["business_email"] = user_data.get("business_email", "")
+                    result["business_phone"] = user_data.get("business_phone", "")
+
+                    # Последние посты
+                    posts = []
+                    timeline = user_data.get("edge_owner_to_timeline_media", {}).get("edges", [])
+                    for edge in timeline[:6]:
+                        node = edge.get("node", {})
+                        posts.append({
+                            "id": node.get("id", ""),
+                            "shortcode": node.get("shortcode", ""),
+                            "url": f"https://www.instagram.com/p/{node.get('shortcode', '')}/",
+                            "caption": (node.get("edge_media_to_caption", {})
+                                            .get("edges", [{}])[0]
+                                            .get("node", {})
+                                            .get("text", ""))[:200],
+                            "thumb": node.get("thumbnail_src", ""),
+                            "likes": node.get("edge_liked_by", {}).get("count", 0),
+                            "comments": node.get("edge_media_to_comment", {}).get("count", 0),
+                            "taken_at": node.get("taken_at_timestamp", 0),
+                            "is_video": node.get("is_video", False),
+                            "video_views": node.get("video_view_count", 0),
+                            "duration": node.get("video_duration", 0),
+                        })
+                    if posts:
+                        result["recent_posts"] = posts
+            else:
+                # Fallback 1 — мета-теги для основных данных
+                og_desc = re.search(r'<meta[^>]*property="og:description"[^>]*content="([^"]+)"', text)
+                if og_desc:
+                    desc = og_desc.group(1)
                     result["biography"] = desc[:500]
                     parts = desc.split("·")
                     if len(parts) >= 3:
                         result["media_count"] = parts[0].strip().split()[0] if parts[0].strip() else "?"
                         result["follower_count"] = parts[1].strip().split()[0] if len(parts) > 1 else "?"
 
-                m = re.search(r'<meta[^>]*property="og:image"[^>]*content="([^"]+)"', text)
-                if m:
-                    result["profile_pic"] = m.group(1)
+                for pat, key in [
+                    (r'"follower_count":(\d+)', "follower_count"),
+                    (r'"following_count":(\d+)', "following_count"),
+                    (r'"media_count":(\d+)', "media_count"),
+                ]:
+                    m = re.search(pat, text)
+                    if m:
+                        try:
+                            result[key] = int(m.group(1))
+                        except ValueError:
+                            pass
 
                 if '"is_verified":true' in text:
                     result["is_verified"] = True
@@ -3024,42 +3100,30 @@ async def instagram_profile_lookup(username: str) -> dict:
                 if '"is_business_account":true' in text:
                     result["is_business"] = True
 
-                m = re.search(r'"follower_count":(\d+)', text)
-                if m:
-                    result["follower_count"] = int(m.group(1))
-                m = re.search(r'"following_count":(\d+)', text)
-                if m:
-                    result["following_count"] = int(m.group(1))
-                m = re.search(r'"media_count":(\d+)', text)
-                if m:
-                    result["media_count"] = int(m.group(1))
-            else:
-                # 2 — fallback через публичный API
-                api_headers = {
-                    "User-Agent": USER_AGENT,
-                    "Accept": "application/json",
-                    "X-IG-App-ID": "936619743392459",
-                }
-                r2 = await c.get(
-                    f"https://i.instagram.com/api/v1/users/web_profile_info/?username={username}",
-                    headers=api_headers,
-                )
-                if r2.status_code == 200:
-                    user = r2.json().get("data", {}).get("user", {})
-                    if user:
-                        result["found"] = True
-                        result["full_name"] = user.get("full_name", "")
-                        result["biography"] = user.get("biography", "")
-                        result["follower_count"] = user.get("edge_followed_by", {}).get("count", 0)
-                        result["following_count"] = user.get("edge_follow", {}).get("count", 0)
-                        result["media_count"] = user.get("edge_owner_to_timeline_media", {}).get("count", 0)
-                        result["profile_pic"] = user.get("profile_pic_url_hd", "")
-                        result["is_private"] = user.get("is_private", False)
-                        result["is_verified"] = user.get("is_verified", False)
-                        result["is_business"] = user.get("is_business_account", False)
-                        result["external_url"] = user.get("external_url", "")
-                else:
-                    result["error"] = f"Пользователь не найден или Instagram заблокировал запрос"
+                # Fallback 2 — публичный API Instagram
+                if not result.get("follower_count"):
+                    api_headers = {
+                        "User-Agent": USER_AGENT,
+                        "Accept": "application/json",
+                        "X-IG-App-ID": "936619743392459",
+                    }
+                    r2 = await c.get(
+                        f"https://i.instagram.com/api/v1/users/web_profile_info/?username={username}",
+                        headers=api_headers,
+                    )
+                    if r2.status_code == 200:
+                        user = r2.json().get("data", {}).get("user", {})
+                        if user:
+                            result["full_name"] = user.get("full_name", result.get("full_name", ""))
+                            result["biography"] = user.get("biography", result.get("biography", ""))
+                            result["follower_count"] = user.get("edge_followed_by", {}).get("count", 0)
+                            result["following_count"] = user.get("edge_follow", {}).get("count", 0)
+                            result["media_count"] = user.get("edge_owner_to_timeline_media", {}).get("count", 0)
+                            result["profile_pic"] = user.get("profile_pic_url_hd", "") or result.get("profile_pic", "")
+                            result["is_private"] = user.get("is_private", result.get("is_private", False))
+                            result["is_verified"] = user.get("is_verified", result.get("is_verified", False))
+                            result["is_business"] = user.get("is_business_account", result.get("is_business", False))
+                            result["external_url"] = user.get("external_url", result.get("external_url", ""))
 
     except Exception as e:
         result["error"] = f"Ошибка Instagram: {type(e).__name__}: {e}"
