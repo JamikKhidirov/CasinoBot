@@ -7,6 +7,10 @@ import dns.resolver
 import httpx
 import asyncio
 import logging
+import warnings
+warnings.filterwarnings("ignore", message=".*verify.*", category=Warning)
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
 HTTP_TIMEOUT = 12.0
@@ -2990,8 +2994,7 @@ async def instagram_profile_lookup(username: str) -> dict:
     result = {"input": username, "found": False, "error": None}
 
     try:
-        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as c:
-            # 1 — через OG-теги публичной страницы (всегда работает)
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True, verify=False) as c:
             headers = {"User-Agent": USER_AGENT, "Accept-Language": "en"}
             r = await c.get(f"https://www.instagram.com/{username}/", headers=headers)
 
@@ -3062,85 +3065,6 @@ async def instagram_profile_lookup(username: str) -> dict:
 
     except Exception as e:
         result["error"] = f"Ошибка Instagram: {type(e).__name__}: {e}"
-
-    return result
-
-
-# ==================== TIKTOK PROFILE LOOKUP ====================
-
-async def tiktok_profile_lookup(username: str) -> dict:
-    """TikTok — детальный профиль по username через публичные источники."""
-    username = username.strip().lstrip("@")
-    result = {"input": username, "found": False, "error": None}
-
-    try:
-        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as c:
-            # 1 — OG-теги публичной страницы
-            headers = {"User-Agent": USER_AGENT, "Accept-Language": "en"}
-            r = await c.get(f"https://www.tiktok.com/@{username}", headers=headers)
-
-            if r.status_code != 200 or "Couldn't find this account" in r.text:
-                result["error"] = "Пользователь не найден"
-                return result
-
-            text = r.text
-            result["found"] = True
-
-            m = re.search(r'<meta[^>]*property="og:title"[^>]*content="([^"]+)"', text)
-            if m:
-                result["nickname"] = m.group(1)
-
-            m = re.search(r'<meta[^>]*name="description"[^>]*content="([^"]+)"', text)
-            if m:
-                result["bio"] = m.group(1)[:500]
-
-            m = re.search(r'<meta[^>]*property="og:image"[^>]*content="([^"]+)"', text)
-            if m:
-                result["avatar"] = m.group(1)
-
-            # 2 — TikTok API (без авторизации)
-            api_headers = {
-                "User-Agent": USER_AGENT,
-                "Accept": "application/json",
-                "Referer": f"https://www.tiktok.com/@{username}",
-            }
-            r2 = await c.get(
-                f"https://www.tiktok.com/api/user/detail/?uniqueId={username}&lang=en",
-                headers=api_headers,
-            )
-            if r2.status_code == 200:
-                j = r2.json()
-                user = j.get("userInfo", {}).get("user", {}) or j.get("data", {}).get("user", {})
-                if user:
-                    result["nickname"] = user.get("nickname", result.get("nickname", ""))
-                    result["bio"] = user.get("signature", result.get("bio", ""))
-                    result["avatar"] = user.get("avatarLarger", user.get("avatarMedium", user.get("avatarThumb", "")))
-                    result["followerCount"] = user.get("followerCount", 0)
-                    result["followingCount"] = user.get("followingCount", 0)
-                    result["videoCount"] = user.get("videoCount", 0)
-                    result["heartCount"] = user.get("heartCount", 0)
-                    result["verified"] = user.get("verified", False)
-                    result["privateAccount"] = user.get("privateAccount", False)
-                    result["region"] = user.get("region", "")
-                    result["tt_unique_id"] = user.get("uniqueId", "")
-
-            if not result.get("followerCount") and not result.get("videoCount"):
-                for pat in [
-                    r'"followerCount":(\d+)', r'"followingCount":(\d+)',
-                    r'"videoCount":(\d+)', r'"heartCount":(\d+)',
-                    r'"verified":(true|false)', r'"privateAccount":(true|false)',
-                ]:
-                    m = re.search(pat, text)
-                    if m:
-                        key = pat.split(":")[0].strip('"')
-                        val = m.group(1)
-                        if val in ("true", "false"):
-                            result[key] = val == "true"
-                        else:
-                            result[key] = int(val)
-
-    except Exception as e:
-        result["error"] = f"Ошибка TikTok: {type(e).__name__}: {e}"
 
     return result
 

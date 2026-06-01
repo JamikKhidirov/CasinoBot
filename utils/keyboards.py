@@ -39,7 +39,6 @@ def osint_menu_kb():
         InlineKeyboardButton(text="📸 Instagram", callback_data="osint_instagram"),
     )
     builder.row(
-        InlineKeyboardButton(text="🎵 TikTok", callback_data="osint_tiktok"),
         InlineKeyboardButton(text="🐦 Twitter/X", callback_data="osint_twitter"),
     )
     builder.row(InlineKeyboardButton(text="▶️ YouTube", callback_data="osint_youtube"))
@@ -78,69 +77,34 @@ def osint_result_kb(mode: str, data: dict = None):
     builder = InlineKeyboardBuilder()
 
     if mode == "tg" and data:
-        username = data.get("username")
-        if username:
-            builder.row(InlineKeyboardButton(
-                text="📂 Открыть профиль",
-                url=f"https://t.me/{username}"
-            ))
-            builder.row(InlineKeyboardButton(
-                text="🔍 Искать в Telegram",
-                url=f"tg://search?q=%40{username}"
-            ))
-
-        common_chats = data.get("common_chats", [])
-        if len(common_chats) > 5:
-            builder.row(InlineKeyboardButton(
-                text="👥 Все общие группы",
-                callback_data="tg_common_chats"
-            ))
-
-        public_msgs = data.get("public_messages", [])
-        voice_count = sum(1 for m in public_msgs if m.get("has_voice"))
-        if voice_count > 0:
-            builder.row(InlineKeyboardButton(
-                text=f"🎤 {voice_count} голосовых",
-                callback_data="tg_voice_msgs"
-            ))
-
+        total = data.get("total_msgs", 0)
+        cc = data.get("common_chats", [])
+        voice = sum(1 for m in (data.get("public_messages", []) + data.get("author_messages", [])) if m.get("has_voice"))
+        nav = []
+        if total:
+            nav.append(InlineKeyboardButton(text=f"💬 Сообщения ({total})", callback_data="tg_browse_msgs"))
+        if cc:
+            nav.append(InlineKeyboardButton(text=f"📋 Каналы ({len(cc)})", callback_data="tg_browse_chats"))
+        if voice:
+            nav.append(InlineKeyboardButton(text=f"🎤 Голосовые ({voice})", callback_data="tg_browse_voices"))
+        if nav:
+            builder.row(*nav[:2])
+            if len(nav) > 2:
+                builder.row(nav[2])
     elif mode == "instagram" and data:
-        builder.row(InlineKeyboardButton(
-            text="📸 Открыть Instagram",
-            url=f"https://instagram.com/{data['input']}"
-        ))
-    elif mode == "tiktok" and data:
-        builder.row(InlineKeyboardButton(
-            text="🎵 Открыть TikTok",
-            url=f"https://tiktok.com/@{data['input']}"
-        ))
+        builder.row(InlineKeyboardButton(text="📸 Открыть Instagram", url=f"https://instagram.com/{data['input']}"))
     elif mode == "twitter" and data:
-        builder.row(InlineKeyboardButton(
-            text="🐦 Открыть Twitter/X",
-            url=f"https://x.com/{data['input']}"
-        ))
+        builder.row(InlineKeyboardButton(text="🐦 Открыть Twitter/X", url=f"https://x.com/{data['input']}"))
     elif mode == "youtube" and data:
-        builder.row(InlineKeyboardButton(
-            text="▶️ Открыть YouTube",
-            url=f"https://youtube.com/@{data['input']}"
-        ))
+        builder.row(InlineKeyboardButton(text="▶️ Открыть YouTube", url=f"https://youtube.com/@{data['input']}"))
     elif mode == "phone" and data:
         phone = data.get("e164", "")
         if phone:
-            builder.row(InlineKeyboardButton(
-                text="📱 Открыть в Telegram",
-                url=f"https://t.me/{phone}"
-            ))
+            builder.row(InlineKeyboardButton(text="📱 Открыть в Telegram", url=f"https://t.me/{phone}"))
     elif mode == "username" and data:
         uname = data.get("username", "")
         if uname:
-            builder.row(InlineKeyboardButton(
-                text="🔍 Искать везде",
-                url=f"https://www.google.com/search?q=%22{uname}%22"
-            ))
+            builder.row(InlineKeyboardButton(text="🔍 Искать везде", url=f"https://www.google.com/search?q=%22{uname}%22"))
 
-    builder.row(InlineKeyboardButton(
-        text="◀️ Назад в OSINT",
-        callback_data="osint_menu"
-    ))
+    builder.row(InlineKeyboardButton(text="◀️ Назад в OSINT", callback_data="osint_menu"))
     return builder.as_markup()

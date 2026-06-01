@@ -15,8 +15,8 @@ from osint import (phone_lookup, email_lookup, username_lookup, ip_lookup,
                    hunter_email, tech_detect, enhanced_port_scan,
                      phone_full_enrich, username_phone_search, username_messages_search,
                      phone_scan, card_lookup, phone_card_search, wifi_analyze,
-                     telegram_account_lookup, instagram_profile_lookup,
-                     tiktok_profile_lookup, twitter_profile_lookup, youtube_channel_lookup)
+                      telegram_account_lookup, instagram_profile_lookup,
+                      twitter_profile_lookup, youtube_channel_lookup)
 from leak import leak_search
 
 router = Router()
@@ -824,120 +824,159 @@ def _fmt_tech(data: dict) -> str:
     return "\n".join(parts)
 
 
+_tg_browse_state: dict[int, dict] = {}  # admin_uid -> {"target_id": int, "mode": str, "page": int}
+
+
+def _tg_browse_kb(page: int, total: int, back_cb: str) -> InlineKeyboardMarkup:
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data="tg_browse_prev"))
+    nav.append(InlineKeyboardButton(text=f"{page+1}/{total}", callback_data="tg_browse_info"))
+    if page < total - 1:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data="tg_browse_next"))
+    kb = [nav, [InlineKeyboardButton(text="◀️ Назад", callback_data=back_cb)]]
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def _msg_line(msg: dict, i: int = None) -> str:
+    icons = {"text": "💬", "photo": "📸", "voice": "🎤", "video": "🎬", "audio": "🎵", "document": "📄", "link": "🔗", "media": "📎"}
+    icon = icons.get(msg.get("media_type", "text"), "💬")
+    chat = msg.get("chat", "?")
+    date = (msg.get("date", "") or "")[:10]
+    link = msg.get("link", "")
+    txt = (msg.get("text", "") or "")[:150]
+    dur = msg.get("voice_duration", 0)
+    num = f"{i}. " if i else ""
+    lines = [f"┃ {num}{icon} [{chat}] {date}"]
+    if msg.get("media_type") == "voice" and dur:
+        m, s = divmod(dur, 60)
+        lines.append(f"┃    🎤 Голосовое {m}:{s:02d}")
+    elif msg.get("media_type") == "photo":
+        lines.append(f"┃    📸 Фото")
+    elif msg.get("media_type") == "video":
+        lines.append(f"┃    🎬 Видео")
+    if txt:
+        lines.append(f"┃    {txt}")
+    if link:
+        lines.append(f"┃    <a href='{link}'>🔗 Ссылка</a>")
+    return "\n".join(lines)
+
+
 def _fmt_tg_account(data: dict) -> str:
     if data.get("error"):
         return f"❌ {data['error']}"
     if not data.get("found"):
         return f"❌ Аккаунт не найден"
-    lines = [f"<b>✈️ Telegram аккаунт — полный отчёт</b>"]
-    if data.get("type") == "phone":
-        lines.append(f"┃ 📱 Введён номер: <code>{data['input']}</code>")
-    else:
-        lines.append(f"┃ 🔗 Введён username: @{data['input']}")
-    lines.append(f"┃ ═══════════════════════════")
-
-    # ===== БАЗОВАЯ ИНФОРМАЦИЯ =====
-    if data.get("username"):
-        lines.append(f"┃ 🔗 Username: <b>@{data['username']}</b>")
+    lines = [f"<b>✈️ Telegram — @{data.get('username') or data['input']}</b>"]
     if data.get("first_name") or data.get("last_name"):
-        lines.append(f"┃ 👤 Имя: <b>{data.get('first_name', '')} {data.get('last_name', '')}</b>".strip())
+        lines.append(f"┃ 👤 {data.get('first_name','')} {data.get('last_name','')}".strip())
+    lines.append(f"┃ 🆔 <code>{data['user_id']}</code>")
     if data.get("phone"):
-        lines.append(f"┃ 📱 Телефон: <code>{data['phone']}</code>")
-    else:
-        lines.append(f"┃ 📱 Телефон: 🔒 скрыт")
-    lines.append(f"┃ 🆔 ID: <code>{data['user_id']}</code>")
-
-    tags = []
-    if data.get("bot"): tags.append("🤖 Бот")
-    if data.get("premium"): tags.append("⭐ Premium")
-    if data.get("verified"): tags.append("✅ Вериф")
-    if data.get("scam"): tags.append("⚠️ Scam")
-    if data.get("fake"): tags.append("⚠️ Fake")
-    if data.get("restricted"): tags.append("🔒 Ограничен")
-    if tags:
-        lines.append(f"┃ {' · '.join(tags)}")
-
-    if data.get("has_profile_photo"):
-        lines.append(f"┃ 📸 Фото: ✅ есть")
-    if data.get("status"):
-        s = data["status"].replace("UserStatus", "").replace("Recently", "🟡 недавно").replace("Online", "🟢 Онлайн").replace("Offline", "🔴 Офлайн").replace("LastWeek", "⚪ на неделе").replace("LastMonth", "⚪ в месяце").replace("LongTimeAgo", "⚪ давно")
-        lines.append(f"┃ 📊 Статус: {s}")
+        lines.append(f"┃ 📱 <code>{data['phone']}</code>")
     if data.get("bio"):
-        lines.append(f"┃ 📝 Био: {data['bio'][:200]}")
-
-    # ===== ОБЩИЕ ГРУППЫ =====
-    common_chats = data.get("common_chats", [])
-    admin_channels = data.get("admin_channels", [])
-    if data.get("common_chats_count") is not None and data["common_chats_count"] > 0:
-        lines.append(f"┃ 👥 Совместных групп: <b>{data['common_chats_count']}</b>")
-    if common_chats:
-        lines.append(f"┃ ═══════════════════════════")
-        lines.append(f"┃ <b>📋 Общие каналы/группы ({len(common_chats)}):</b>")
-        for chat in common_chats[:15]:
-            title = chat.get("title", "")
-            username = chat.get("username", "")
-            participants = chat.get("participants", 0)
-            ctype = chat.get("type", "")
-            line = f"┃  {'📢' if ctype == 'channel' else '💬'} {title}"
-            if username:
-                line += f" <a href='https://t.me/{username}'>@{username}</a>"
-            if participants:
-                line += f" | 👥 {participants:,}"
-            lines.append(line)
-    if admin_channels:
-        lines.append(f"┃ <b>👑 Каналы где админ ({len(admin_channels)}):</b>")
-        for ch in admin_channels[:5]:
-            title = ch.get("title", "")
-            username = ch.get("username", "")
-            line = f"┃  👑 {title}"
-            if username:
-                line += f" <a href='https://t.me/{username}'>@{username}</a>"
-            lines.append(line)
-
-    # ===== СООБЩЕНИЯ =====
-    public_msgs = data.get("public_messages", [])
-    if public_msgs:
-        voice_count = sum(1 for m in public_msgs if m.get("has_voice"))
-        lines.append(f"┃ ═══════════════════════════")
-        lines.append(f"┃ <b>📰 Найдено сообщений: {len(public_msgs)}</b>")
-        if voice_count:
-            lines.append(f"┃ 🎤 Из них голосовых: {voice_count}")
-        for i, msg in enumerate(public_msgs[:15], 1):
-            chat = msg.get("chat", "?")
-            link = msg.get("link", "")
-            date = msg.get("date", "")[:10] if msg.get("date") else ""
-            mt = msg.get("media_type", "text")
-            voice_dur = msg.get("voice_duration", 0)
-
-            # Иконка типа
-            icons = {"text": "💬", "photo": "📸", "voice": "🎤", "video": "🎬", "audio": "🎵", "document": "📄", "link": "🔗", "media": "📎"}
-            icon = icons.get(mt, "💬")
-
-            lines.append(f"┃  {i}. {icon} [{chat}] {date}")
-            if mt == "voice" and voice_dur:
-                mins, secs = divmod(voice_dur, 60)
-                lines.append(f"┃    🎤 Голосовое {mins}:{secs:02d}")
-            elif mt == "photo":
-                lines.append(f"┃    📸 Фото")
-            elif mt == "video":
-                lines.append(f"┃    🎬 Видео")
-            txt = msg.get("text", "")
-            if txt:
-                lines.append(f"┃    {txt[:110]}")
-            if link:
-                lines.append(f"┃    <a href='{link}'>🔗 открыть сообщение</a>")
-
-    # ===== ФУТЕР =====
-    lines.append(f"┃ ═══════════════════════════")
-    if data.get("found_by") == "phone_to_username":
-        lines.append(f"┃ 🔄 Найден по номеру → username")
-    elif data.get("found_by") == "username_to_phone":
-        lines.append(f"┃ 🔄 Найден по username → номер")
-    if not public_msgs and not common_chats:
-        lines.append(f"┃ ℹ️ Нет публичных сообщений и общих групп")
-        lines.append(f"┃    (пользователь скрыт или данных нет)")
-
+        lines.append(f"┃ 📝 {data['bio'][:200]}")
+    if data.get("common_chats_count"):
+        lines.append(f"┃ 👥 Общих групп: <b>{data['common_chats_count']}</b>")
+    tags = []
+    if data.get("premium"): tags.append("⭐")
+    if data.get("verified"): tags.append("✅")
+    if data.get("bot"): tags.append("🤖")
+    if tags:
+        lines.append(f"┃ {' '.join(tags)}")
     return "\n".join(lines)
+
+
+async def _show_tg_msgs_page(call: CallbackQuery, admin_uid: int, page: int = 0):
+    state = _tg_browse_state.get(admin_uid)
+    if not state:
+        await call.answer("❌ Данные устарели. Выполните поиск заново.", show_alert=True)
+        return
+    from osint import get_tg_msg_page, get_tg_msg_total
+    total = get_tg_msg_total(state["target_id"])
+    if not total:
+        await call.answer("❌ Нет сообщений.", show_alert=True)
+        return
+    msgs = get_tg_msg_page(state["target_id"], page)
+    if not msgs:
+        await call.answer("❌ Страница пуста.", show_alert=True)
+        return
+    pages = (total + 9) // 10
+    lines = [f"<b>💬 Сообщения ({total})</b>\n"]
+    for i, m in enumerate(msgs, page * 10 + 1):
+        lines.append(_msg_line(m, i))
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3997] + "..."
+    state["mode"] = "msgs"
+    state["page"] = page
+    await call.message.edit_text(text, parse_mode="HTML", disable_web_page_preview=True,
+                                 reply_markup=_tg_browse_kb(page, pages, "tg_browse_back"))
+
+
+async def _show_tg_chats_page(call: CallbackQuery, admin_uid: int, page: int = 0):
+    state = _tg_browse_state.get(admin_uid)
+    if not state:
+        await call.answer("❌ Данные устарели.", show_alert=True)
+        return
+    chats = state.get("chats", [])
+    if not chats:
+        await call.answer("❌ Нет каналов.", show_alert=True)
+        return
+    page_size = 15
+    pages = (len(chats) + page_size - 1) // page_size
+    chunk = chats[page * page_size:(page + 1) * page_size]
+    lines = [f"<b>📋 Каналы/группы ({len(chats)})</b>\n"]
+    for ch in chunk:
+        title = ch.get("title", "")
+        uname = ch.get("username", "")
+        p = ch.get("participants", 0)
+        ct = ch.get("type", "")
+        icon = "📢" if ct == "channel" else "💬"
+        line = f"┃ {icon} {title}"
+        if uname:
+            line += f"  <a href='https://t.me/{uname}'>@{uname}</a>"
+        if p:
+            line += f"  👥 {p:,}"
+        lines.append(line)
+    state["mode"] = "chats"
+    state["page"] = page
+    await call.message.edit_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True,
+                                 reply_markup=_tg_browse_kb(page, pages, "tg_browse_back"))
+
+
+async def _show_tg_voices_page(call: CallbackQuery, admin_uid: int, page: int = 0):
+    state = _tg_browse_state.get(admin_uid)
+    if not state:
+        await call.answer("❌ Данные устарели.", show_alert=True)
+        return
+    from osint import get_tg_msg_page, get_tg_msg_total
+    total = get_tg_msg_total(state["target_id"])
+    if not total:
+        await call.answer("❌ Нет голосовых.", show_alert=True)
+        return
+    all_msgs = []
+    for p in range((total + 9) // 10):
+        all_msgs.extend(get_tg_msg_page(state["target_id"], p))
+    voices = [m for m in all_msgs if m.get("has_voice")]
+    if not voices:
+        await call.answer("❌ Нет голосовых сообщений.", show_alert=True)
+        return
+    page_size = 10
+    pages = (len(voices) + page_size - 1) // page_size
+    chunk = voices[page * page_size:(page + 1) * page_size]
+    lines = [f"<b>🎤 Голосовые сообщения ({len(voices)})</b>\n"]
+    for i, m in enumerate(chunk, page * page_size + 1):
+        dur = m.get("voice_duration", 0)
+        mm, ss = divmod(dur, 60)
+        link = m.get("link", "")
+        chat = m.get("chat", "?")
+        lines.append(f"┃ {i}. 🎤 [{chat}] {mm}:{ss:02d}")
+        if link:
+            lines.append(f"┃    <a href='{link}'>🔗 Слушать</a>")
+    state["mode"] = "voices"
+    state["page"] = page
+    await call.message.edit_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True,
+                                 reply_markup=_tg_browse_kb(page, pages, "tg_browse_back"))
 
 
 def _fmt_instagram(data: dict) -> str:
@@ -968,36 +1007,6 @@ def _fmt_instagram(data: dict) -> str:
         lines.append(f"┃ 🏢 Категория: {data['business_category']}")
     if data.get("external_url"):
         lines.append(f"┃ 🔗 Ссылка: <code>{data['external_url']}</code>")
-    return "\n".join(lines)
-
-
-def _fmt_tiktok(data: dict) -> str:
-    if data.get("error"):
-        return f"❌ {data['error']}"
-    if not data.get("found"):
-        return f"❌ Профиль TikTok не найден"
-    lines = [
-        f"<b>🎵 TikTok профиль</b>",
-        f"┃ Username: @{data['input']}",
-    ]
-    if data.get("nickname"):
-        lines.append(f"┃ 👤 Никнейм: <b>{data['nickname']}</b>")
-    if data.get("bio"):
-        lines.append(f"┃ 📝 Описание: {data['bio'][:300]}")
-    lines.append(f"┃ ━━━━━━━━━━━━━━━━━━━")
-    if data.get("followerCount") is not None:
-        lines.append(f"┃ 👥 Подписчики: <b>{data['followerCount']:,}</b>")
-    if data.get("followingCount") is not None:
-        lines.append(f"┃ 👣 Подписки: <b>{data['followingCount']:,}</b>")
-    if data.get("videoCount") is not None:
-        lines.append(f"┃ 🎬 Видео: <b>{data['videoCount']:,}</b>")
-    if data.get("heartCount") is not None:
-        lines.append(f"┃ ❤️ Лайки: <b>{data['heartCount']:,}</b>")
-    tags = []
-    if data.get("verified"): tags.append("✅ Верифицирован")
-    if data.get("privateAccount"): tags.append("🔒 Приватный")
-    if tags:
-        lines.append(f"┃ {' | '.join(tags)}")
     return "\n".join(lines)
 
 
@@ -1180,14 +1189,19 @@ async def _execute_lookup(message: Message, mode: str, query: str):
             result = await telegram_account_lookup(query)
             log_osint_query(uid, "tg", query)
             formatted = _fmt_tg_account(result)
+            if result.get("found"):
+                _tg_browse_state[uid] = {
+                    "target_id": result["user_id"],
+                    "mode": "info",
+                    "page": 0,
+                    "chats": result.get("common_chats", []),
+                    "info_text": formatted,
+                    "data": result,
+                }
         elif mode == "instagram":
             result = await instagram_profile_lookup(query)
             log_osint_query(uid, "instagram", query)
             formatted = _fmt_instagram(result)
-        elif mode == "tiktok":
-            result = await tiktok_profile_lookup(query)
-            log_osint_query(uid, "tiktok", query)
-            formatted = _fmt_tiktok(result)
         elif mode == "twitter":
             result = await twitter_profile_lookup(query)
             log_osint_query(uid, "twitter", query)
@@ -1210,7 +1224,11 @@ async def _execute_lookup(message: Message, mode: str, query: str):
     if result and mode == "phone":
         logger.info(f"all_names={result.get('all_names', [])} social_profiles={result.get('social_profiles', {}).get('profiles', [])}")
 
-    await message.answer("Выберите действие:", reply_markup=osint_result_kb(mode, result))
+    if mode == "tg" and result and result.get("found"):
+        _tg_browse_state[uid]["info_text"] = formatted
+
+    await message.answer(formatted, parse_mode="HTML", disable_web_page_preview=True,
+                         reply_markup=osint_result_kb(mode, result))
 
 
 def _cmd_shortcut(mode: str, prompt: str, example: str):
@@ -1331,7 +1349,6 @@ router.message.register(_cmd_shortcut("tg", "✈️ Введите username ил
     "🔁 username → номер телефона\n"
     "🔁 номер телефона → username", "@username или +79991234567"), Command("tg"))
 router.message.register(_cmd_shortcut("instagram", "📸 Введите username Instagram\nПример: @username", "username"), Command("instagram"))
-router.message.register(_cmd_shortcut("tiktok", "🎵 Введите username TikTok\nПример: @username", "username"), Command("tiktok"))
 router.message.register(_cmd_shortcut("twitter", "🐦 Введите username Twitter/X\nПример: @username", "username"), Command("twitter"))
 router.message.register(_cmd_shortcut("youtube", "▶️ Введите handle YouTube-канала\nПример: @channel", "@channel"), Command("youtube"))
 
@@ -1356,7 +1373,7 @@ async def cmd_help(message: Message):
             "┃ <code>/tg</code> — Telegram аккаунт (username↔номер, общие группы, сообщения)\n"
             "┃ <code>/setup_tg</code> — настройка Telethon (вход в аккаунт)\n"
             "┃ <code>/instagram</code> — Instagram профиль\n"
-            "┃ <code>/tiktok</code> — TikTok профиль\n"
+
             "┃ <code>/twitter</code> — Twitter/X профиль\n"
             "┃ <code>/youtube</code> — YouTube канал\n"
         )
@@ -1401,6 +1418,66 @@ async def cmd_help(message: Message):
     await message.answer(text, parse_mode="HTML", reply_markup=main_kb(show_osint=show_osint, show_admin=is_adm))
 
 
+# ─── TG browse pagination callbacks ────────────────────────────────
+
+
+@router.callback_query(F.data.startswith("tg_browse_"))
+async def cb_tg_browse(call: CallbackQuery):
+    uid = call.from_user.id
+    action = call.data.split("_", 2)[2]
+    if action == "back":
+        state = _tg_browse_state.get(uid)
+        if not state:
+            await call.answer("❌ Данные устарели.", show_alert=True)
+            return
+        info = state.get("info_text") or "❌ Информация недоступна"
+        data = state.get("data", {})
+        await call.message.edit_text(info, parse_mode="HTML", disable_web_page_preview=True,
+                                     reply_markup=osint_result_kb("tg", data))
+        return
+    elif action == "msgs":
+        await _show_tg_msgs_page(call, uid, 0)
+    elif action == "chats":
+        await _show_tg_chats_page(call, uid, 0)
+    elif action == "voices":
+        await _show_tg_voices_page(call, uid, 0)
+    elif action == "info":
+        await call.answer()
+        return
+    elif action == "prev":
+        state = _tg_browse_state.get(uid)
+        if not state:
+            await call.answer("❌ Данные устарели.", show_alert=True)
+            return
+        p = max(0, state.get("page", 0) - 1)
+        mode = state.get("mode", "msgs")
+        if mode == "msgs":
+            await _show_tg_msgs_page(call, uid, p)
+        elif mode == "chats":
+            await _show_tg_chats_page(call, uid, p)
+        elif mode == "voices":
+            await _show_tg_voices_page(call, uid, p)
+    elif action == "next":
+        state = _tg_browse_state.get(uid)
+        if not state:
+            await call.answer("❌ Данные устарели.", show_alert=True)
+            return
+        p = state.get("page", 0) + 1
+        mode = state.get("mode", "msgs")
+        if mode == "msgs":
+            await _show_tg_msgs_page(call, uid, p)
+        elif mode == "chats":
+            await _show_tg_chats_page(call, uid, p)
+        elif mode == "voices":
+            await _show_tg_voices_page(call, uid, p)
+    else:
+        await call.answer()
+    return
+
+
+# ─── OSINT menu callbacks ──────────────────────────────────────────
+
+
 @router.callback_query(F.data.startswith("osint_"))
 async def osint_callback(call: CallbackQuery):
     uid = call.from_user.id
@@ -1442,7 +1519,6 @@ async def osint_callback(call: CallbackQuery):
         "osint_tg": ("✈️ Введите username (@ivanov) или номер телефона (+79991234567)\n\n"
                      "🔁 username → номер\n🔁 номер → username", "tg"),
         "osint_instagram": ("📸 Введите username Instagram\nПример: @username", "instagram"),
-        "osint_tiktok": ("🎵 Введите username TikTok\nПример: @username", "tiktok"),
         "osint_twitter": ("🐦 Введите username Twitter/X\nПример: @username", "twitter"),
         "osint_youtube": ("▶️ Введите handle YouTube-канала\nПример: @channel", "youtube"),
     }
@@ -1591,14 +1667,19 @@ async def osint_text_handler(message: Message):
             result = await telegram_account_lookup(text)
             log_osint_query(uid, "tg", text)
             formatted = _fmt_tg_account(result)
+            if result.get("found"):
+                _tg_browse_state[uid] = {
+                    "target_id": result["user_id"],
+                    "mode": "info",
+                    "page": 0,
+                    "chats": result.get("common_chats", []),
+                    "info_text": formatted,
+                    "data": result,
+                }
         elif mode == "instagram":
             result = await instagram_profile_lookup(text)
             log_osint_query(uid, "instagram", text)
             formatted = _fmt_instagram(result)
-        elif mode == "tiktok":
-            result = await tiktok_profile_lookup(text)
-            log_osint_query(uid, "tiktok", text)
-            formatted = _fmt_tiktok(result)
         elif mode == "twitter":
             result = await twitter_profile_lookup(text)
             log_osint_query(uid, "twitter", text)
@@ -1632,4 +1713,5 @@ async def osint_text_handler(message: Message):
         )
     except Exception:
         sent = await message.answer(formatted, parse_mode="HTML", disable_web_page_preview=True)
-        await message.answer("Выберите действие:", reply_markup=osint_result_kb(mode, result))
+        await message.answer(formatted, parse_mode="HTML", disable_web_page_preview=True,
+                             reply_markup=osint_result_kb(mode, result))
