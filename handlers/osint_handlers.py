@@ -881,8 +881,56 @@ def _fmt_tg_account(data: dict) -> str:
     if data.get("premium"): tags.append("⭐")
     if data.get("verified"): tags.append("✅")
     if data.get("bot"): tags.append("🤖")
+    if data.get("scam"): tags.append("⚠️")
     if tags:
         lines.append(f"┃ {' '.join(tags)}")
+
+    # ─── Общие каналы/группы (первые 10) ───
+    cc = data.get("common_chats", [])
+    if cc:
+        lines.append(f"┃ ═══════════════════════════")
+        lines.append(f"┃ <b>📋 Каналы/группы ({len(cc)}):</b>")
+        for ch in cc[:10]:
+            title = ch.get("title", "")
+            uname = ch.get("username", "")
+            p = ch.get("participants", 0)
+            ct = ch.get("type", "")
+            icon = "📢" if ct == "channel" else "💬"
+            line = f"┃ {icon} {title}"
+            if uname:
+                line += f"  <a href='https://t.me/{uname}'>@{uname}</a>"
+            if p:
+                line += f"  👥 {p:,}"
+            lines.append(line)
+
+    # ─── Сообщения пользователя в группах (первые 5) ───
+    author_msgs = data.get("author_messages", [])
+    if author_msgs:
+        lines.append(f"┃ ═══════════════════════════")
+        lines.append(f"┃ <b>✏️ Сообщения пользователя ({len(author_msgs)}):</b>")
+        for m in author_msgs[:5]:
+            chat = m.get("chat", "?")
+            link = m.get("link", "")
+            txt = (m.get("text", "") or "")[:100]
+            lines.append(f"┃  💬 [{chat}] {txt}")
+            if link:
+                lines.append(f"┃    <a href='{link}'>🔗 Ссылка</a>")
+
+    # ─── Упоминания в публичных чатах (первые 5) ───
+    pub = data.get("public_messages", [])
+    if pub:
+        lines.append(f"┃ ═══════════════════════════")
+        lines.append(f"┃ <b>📰 Упоминания ({len(pub)}):</b>")
+        for m in pub[:5]:
+            chat = m.get("chat", "?")
+            link = m.get("link", "")
+            txt = (m.get("text", "") or "")[:100]
+            mt = m.get("media_type", "text")
+            icon = {"voice":"🎤","photo":"📸","video":"🎬","audio":"🎵","document":"📄"}.get(mt, "💬")
+            lines.append(f"┃ {icon} [{chat}] {txt}")
+            if link:
+                lines.append(f"┃    <a href='{link}'>🔗 Ссылка</a>")
+
     return "\n".join(lines)
 
 
