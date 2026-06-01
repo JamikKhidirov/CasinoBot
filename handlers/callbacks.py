@@ -204,7 +204,10 @@ async def cb_view_report_chat(call: CallbackQuery):
 async def cb_back_main(call: CallbackQuery):
     uid = call.from_user.id
     show_chat = call.message.chat.type == "private"
-    await call.message.edit_text("👋 Главное меню", reply_markup=main_kb(show_chat=show_chat, show_osint=_show_osint(uid), show_admin=is_admin(uid)))
+    try:
+        await call.message.edit_text("👋 Главное меню", reply_markup=main_kb(show_chat=show_chat, show_osint=_show_osint(uid), show_admin=is_admin(uid)))
+    except Exception:
+        pass
     try:
         await safe_answer(call)
     except Exception:
@@ -233,7 +236,10 @@ async def cb_admin_panel(call: CallbackQuery):
         [InlineKeyboardButton(text="🎰 Админ-панель казино", callback_data="casino_admin")],
         [InlineKeyboardButton(text="◀️ На главную", callback_data="back_main")],
     ])
-    await call.message.edit_text("<b>🛡 Админ-панель</b>\nВыберите раздел:", parse_mode="HTML", reply_markup=keyboard)
+    try:
+        await call.message.edit_text("<b>🛡 Админ-панель</b>\nВыберите раздел:", parse_mode="HTML", reply_markup=keyboard)
+    except Exception:
+        pass
     await safe_answer(call)
 
 

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import random
 import uuid
 from datetime import date, datetime, timedelta
@@ -16,7 +17,8 @@ from utils.helpers import is_dev, is_admin, ban_user, unban_user, mute_user, unm
 logger = logging.getLogger(__name__)
 
 COMMISSION_RATE = Decimal("0.1")
-DB_NAME = "casino.db"
+DATA_DIR = "/data" if os.path.exists("/data") else "."
+DB_NAME = os.path.join(DATA_DIR, "casino.db")
 INITIAL_BALANCE = 1000
 INITIAL_BLACKJACK_BALANCE = 1000
 INITIAL_BOT_BALANCE = 500
