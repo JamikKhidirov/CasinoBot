@@ -4,18 +4,24 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 def main_kb(show_chat: bool = True, show_osint: bool = True, show_admin: bool = False):
     builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="📸 Instagram", callback_data="osint_instagram"),
+        InlineKeyboardButton(text="🎰 Казино", callback_data="casino_menu"),
+    )
     if show_osint:
         builder.row(InlineKeyboardButton(text="🔍 OSINT-пробив", callback_data="osint_menu"))
     if show_chat:
         builder.row(InlineKeyboardButton(text="🎲 Анонимный чат", callback_data="start_chat"))
-    builder.row(InlineKeyboardButton(text="🎰 Казино", callback_data="casino_menu"))
     builder.row(
         InlineKeyboardButton(text="👤 Профиль", callback_data="myprofile"),
-        InlineKeyboardButton(text="📊 Статистика", callback_data="mystats"),
+        InlineKeyboardButton(text="🏆 Топ", callback_data="casino_top"),
     )
     if show_admin:
         builder.row(InlineKeyboardButton(text="🛡 Админ-панель", callback_data="admin_panel"))
-    builder.row(InlineKeyboardButton(text="❓ Помощь", callback_data="help"))
+    builder.row(
+        InlineKeyboardButton(text="📊 Статистика", callback_data="mystats"),
+        InlineKeyboardButton(text="❓ Помощь", callback_data="help"),
+    )
     return builder.as_markup()
 
 

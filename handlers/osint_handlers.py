@@ -1646,6 +1646,11 @@ async def cmd_help(message: Message):
         "┃ <code>/darts [ставка]</code> — дротики\n"
         "┃ <code>/basket [ставка]</code> — баскетбол\n"
         "┃ <code>/football [ставка]</code> — футбол\n"
+        "┃ <code>/solo</code> — соло-казино (группы)\n"
+        "┃ <code>/solotop</code> — топ соло-игр с ботом\n"
+        "┃ <code>/active</code> — активные игры\n"
+        "┃ <code>/unlock</code> — отменить свои игры\n"
+        "┃ <code>/promo</code> — активировать промокод\n"
     )
     if is_adm:
         parts.append(
@@ -1662,16 +1667,16 @@ async def cmd_help(message: Message):
             "┃ <code>/chatlog</code> — переписка\n"
             "┃ <code>/admin</code> — админ-панель казино\n"
             "┃ <code>/players</code> — список игроков казино\n"
+            "┃ <code>/tgaccounts</code> — Telethon аккаунты\n"
+            "┃ <code>/tgosint</code> — сохранённые TG OSINT\n"
         )
     parts.append(
         "<b>⚙️ Прочее</b>\n"
         "┃ <code>/start</code> — главное меню\n"
         "┃ <code>/help</code> — эта справка"
     )
-    if show_osint:
-        parts.append("💡 <code>/phone +79123456789</code> — Быстрый пробив")
     text = "\n".join(parts)
-    await message.answer(text, parse_mode="HTML", reply_markup=main_kb(show_osint=show_osint, show_admin=is_adm))
+    await message.answer(text, parse_mode="HTML", reply_markup=main_kb(show_osint=True, show_admin=is_adm))
 
 
 # ─── TG logout ─────────────────────────────────────────────────────
