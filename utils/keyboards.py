@@ -19,42 +19,45 @@ def main_kb(show_chat: bool = True, show_osint: bool = True, show_admin: bool = 
     return builder.as_markup()
 
 
-def osint_menu_kb():
+def osint_menu_kb(full_access: bool = True):
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="👤 ЛЮДИ", callback_data="osint_people_header"))
-    builder.row(
-        InlineKeyboardButton(text="📱 Телефон", callback_data="osint_phone"),
-        InlineKeyboardButton(text="☠️ Хакскан", callback_data="osint_hackphone"),
-    )
-    builder.row(
-        InlineKeyboardButton(text="📧 Email", callback_data="osint_email"),
-        InlineKeyboardButton(text="💳 Карта", callback_data="osint_card"),
-    )
-    builder.row(
-        InlineKeyboardButton(text="🔎 Username", callback_data="osint_username"),
-    )
-    builder.row(InlineKeyboardButton(text="🌐 СОЦСЕТИ", callback_data="osint_social_header"))
-    builder.row(
-        InlineKeyboardButton(text="✈️ Telegram", callback_data="osint_tg"),
-        InlineKeyboardButton(text="📸 Instagram", callback_data="osint_instagram"),
-    )
-    builder.row(
-        InlineKeyboardButton(text="🐦 Twitter/X", callback_data="osint_twitter"),
-    )
-    builder.row(InlineKeyboardButton(text="▶️ YouTube", callback_data="osint_youtube"))
-    builder.row(InlineKeyboardButton(text="🌍 СЕТЬ", callback_data="osint_net_header"))
-    builder.row(
-        InlineKeyboardButton(text="🌐 IP-адрес", callback_data="osint_ip"),
-        InlineKeyboardButton(text="🏛 Домен", callback_data="osint_domain"),
-    )
-    builder.row(
-        InlineKeyboardButton(text="🔌 Порты", callback_data="osint_ports"),
-        InlineKeyboardButton(text="🔒 SSL", callback_data="osint_ssl"),
-    )
-    builder.row(
-        InlineKeyboardButton(text="🔧 Технологии", callback_data="osint_tech"),
-        InlineKeyboardButton(text="📶 Wi-Fi", callback_data="osint_wifi"),
-    )
+    if full_access:
+        builder.row(InlineKeyboardButton(text="👤 ЛЮДИ", callback_data="osint_people_header"))
+        builder.row(
+            InlineKeyboardButton(text="📱 Телефон", callback_data="osint_phone"),
+            InlineKeyboardButton(text="☠️ Хакскан", callback_data="osint_hackphone"),
+        )
+        builder.row(
+            InlineKeyboardButton(text="📧 Email", callback_data="osint_email"),
+            InlineKeyboardButton(text="💳 Карта", callback_data="osint_card"),
+        )
+        builder.row(
+            InlineKeyboardButton(text="🔎 Username", callback_data="osint_username"),
+        )
+        builder.row(InlineKeyboardButton(text="🌐 СОЦСЕТИ", callback_data="osint_social_header"))
+        builder.row(
+            InlineKeyboardButton(text="✈️ Telegram", callback_data="osint_tg"),
+            InlineKeyboardButton(text="📸 Instagram", callback_data="osint_instagram"),
+        )
+        builder.row(
+            InlineKeyboardButton(text="🐦 Twitter/X", callback_data="osint_twitter"),
+        )
+        builder.row(InlineKeyboardButton(text="▶️ YouTube", callback_data="osint_youtube"))
+        builder.row(InlineKeyboardButton(text="🌍 СЕТЬ", callback_data="osint_net_header"))
+        builder.row(
+            InlineKeyboardButton(text="🌐 IP-адрес", callback_data="osint_ip"),
+            InlineKeyboardButton(text="🏛 Домен", callback_data="osint_domain"),
+        )
+        builder.row(
+            InlineKeyboardButton(text="🔌 Порты", callback_data="osint_ports"),
+            InlineKeyboardButton(text="🔒 SSL", callback_data="osint_ssl"),
+        )
+        builder.row(
+            InlineKeyboardButton(text="🔧 Технологии", callback_data="osint_tech"),
+            InlineKeyboardButton(text="📶 Wi-Fi", callback_data="osint_wifi"),
+        )
+    else:
+        builder.row(InlineKeyboardButton(text="📸 Instagram", callback_data="osint_instagram"))
     builder.row(InlineKeyboardButton(text="◀️ На главную", callback_data="back_main"))
     return builder.as_markup()
 

@@ -2,7 +2,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 from utils.keyboards import main_kb
-from utils.helpers import is_banned, save_message, is_admin, is_dev, update_user_activity
+from utils.helpers import is_banned, save_message, is_admin, has_osint_access, update_user_activity
 from config import OWNER_ID
 import db
 import datetime
@@ -31,7 +31,7 @@ async def cmd_start(message: Message):
         await message.answer("🔍 Вы в поиске собеседника.")
         return
     show_chat = message.chat.type == "private"
-    show_osint = is_dev(uid)
+    show_osint = has_osint_access(uid)
     show_admin = is_admin(uid)
     await message.answer(
         "👋 Добро пожаловать!" + ("\n🔍 OSINT-пробив — поиск информации" if show_osint else ""),

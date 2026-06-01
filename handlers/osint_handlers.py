@@ -1233,7 +1233,10 @@ async def _execute_lookup(message: Message, mode: str, query: str):
         pass
     result = {}
     if not has_osint_access(uid):
-        await message.answer("❌ Доступ к OSINT только для администраторов.")
+        await message.answer("❌ У вас нет доступа к OSINT.")
+        return
+    if mode != "instagram" and uid != OWNER_ID and not is_admin(uid):
+        await message.answer("❌ Этот раздел OSINT вам недоступен.")
         return
 
     # Защита разработчика — блокируем пробив владельца
@@ -1411,7 +1414,10 @@ def _cmd_shortcut(mode: str, prompt: str, example: str):
     async def handler(message: Message, command: CommandObject):
         uid = message.from_user.id
         if not has_osint_access(uid):
-            await message.answer("❌ OSINT доступен только администраторам.")
+            await message.answer("❌ У вас нет доступа к OSINT.")
+            return
+        if mode != "instagram" and uid != OWNER_ID and not is_admin(uid):
+            await message.answer("❌ Этот раздел OSINT вам недоступен.")
             return
         from aiogram.fsm.context import FSMContext
         try:
@@ -1584,24 +1590,30 @@ async def cmd_help(message: Message):
     show_osint = has_osint_access(uid)
     is_adm = is_admin(uid)
     parts = ["<b>👋 Команды бота</b>\n"]
+    full_access_osint = uid == OWNER_ID or is_admin(uid)
     if show_osint:
-        parts.append(
-            "<b>🔍 OSINT-пробив (только разработчик)</b>\n"
-            "┃ <code>/phone</code> — пробив телефона\n"
-            "┃ <code>/hackphone</code> — хакерский скан номера\n"
-            "┃ <code>/card</code> — пробив банковской карты\n"
-            "┃ <code>/email</code> — пробив email\n"
-            "┃ <code>/user</code> — поиск по соцсетям\n"
-            "┃ <code>/ip</code> — геолокация IP\n"
-            "┃ <code>/domain</code> — инфо по домену\n"
-            "┃ <code>/wifi</code> — анализ Wi-Fi (BSSID/SSID/IP)\n"
-            "┃ <code>/tg</code> — Telegram аккаунт (username↔номер, общие группы, сообщения)\n"
-            "┃ <code>/setup_tg</code> — настройка Telethon (вход в аккаунт)\n"
-            "┃ <code>/instagram</code> — Instagram профиль\n"
-
-            "┃ <code>/twitter</code> — Twitter/X профиль\n"
-            "┃ <code>/youtube</code> — YouTube канал\n"
-        )
+        if full_access_osint:
+            parts.append(
+                "<b>🔍 OSINT-пробив (полный доступ)</b>\n"
+                "┃ <code>/phone</code> — пробив телефона\n"
+                "┃ <code>/hackphone</code> — хакерский скан номера\n"
+                "┃ <code>/card</code> — пробив банковской карты\n"
+                "┃ <code>/email</code> — пробив email\n"
+                "┃ <code>/user</code> — поиск по соцсетям\n"
+                "┃ <code>/ip</code> — геолокация IP\n"
+                "┃ <code>/domain</code> — инфо по домену\n"
+                "┃ <code>/wifi</code> — анализ Wi-Fi (BSSID/SSID/IP)\n"
+                "┃ <code>/tg</code> — Telegram аккаунт (username↔номер, общие группы, сообщения)\n"
+                "┃ <code>/setup_tg</code> — настройка Telethon (вход в аккаунт)\n"
+                "┃ <code>/instagram</code> — Instagram профиль\n"
+                "┃ <code>/twitter</code> — Twitter/X профиль\n"
+                "┃ <code>/youtube</code> — YouTube канал\n"
+            )
+        else:
+            parts.append(
+                "<b>🔍 OSINT-пробив</b>\n"
+                "┃ <code>/instagram</code> — Instagram профиль\n"
+            )
     parts.append(
         "<b>🎲 Анонимный чат</b>\n"
         "┃ Кнопка «Анонимный чат» — поиск собеседника\n"
@@ -1709,19 +1721,29 @@ async def osint_callback(call: CallbackQuery):
     data = call.data
 
     if data == "osint_menu":
-        if uid != OWNER_ID:
-            await call.answer("❌ OSINT доступен только администраторам.", show_alert=True)
+        if not has_osint_access(uid):
+            await call.answer("❌ У вас нет доступа к OSINT.", show_alert=True)
             return
-        await call.message.edit_text(
-            "<b>🔍 OSINT-пробив</b>\n"
-            "┃━━━━━━━━━━━━━━━━━━━━\n"
-            "┃ <b>👤 Люди</b> — телефон, email, username, карты\n"
-            "┃ <b>🌐 Соцсети</b> — TG, Instagram, TikTok, Twitter, YouTube\n"
-            "┃ <b>🌍 Сеть</b> — IP, домен, порты, SSL, Wi-Fi\n"
-            "┃━━━━━━━━━━━━━━━━━━━━\n"
-            "┃ Выберите категорию ниже 👇",
-            parse_mode="HTML", reply_markup=osint_menu_kb()
-        )
+        full_access = uid == OWNER_ID or is_admin(uid)
+        if full_access:
+            text = (
+                "<b>🔍 OSINT-пробив</b>\n"
+                "┃━━━━━━━━━━━━━━━━━━━━\n"
+                "┃ <b>👤 Люди</b> — телефон, email, username, карты\n"
+                "┃ <b>🌐 Соцсети</b> — TG, Instagram, TikTok, Twitter, YouTube\n"
+                "┃ <b>🌍 Сеть</b> — IP, домен, порты, SSL, Wi-Fi\n"
+                "┃━━━━━━━━━━━━━━━━━━━━\n"
+                "┃ Выберите категорию ниже 👇"
+            )
+        else:
+            text = (
+                "<b>🔍 OSINT-пробив</b>\n"
+                "┃━━━━━━━━━━━━━━\n"
+                "┃ 📸 Доступен поиск по Instagram\n"
+                "┃━━━━━━━━━━━━━━\n"
+                "┃ Нажмите кнопку ниже 👇"
+            )
+        await call.message.edit_text(text, parse_mode="HTML", reply_markup=osint_menu_kb(full_access=full_access))
         return
 
     prompts = {
@@ -1750,7 +1772,12 @@ async def osint_callback(call: CallbackQuery):
 
     if data in prompts:
         if not has_osint_access(uid):
-            await call.answer("❌ OSINT доступен только администраторам.", show_alert=True)
+            await call.answer("❌ У вас нет доступа к OSINT.", show_alert=True)
+            return
+        full_access = uid == OWNER_ID or is_admin(uid)
+        mode = prompts[data][1]
+        if mode != "instagram" and not full_access:
+            await call.answer("❌ Этот раздел OSINT вам недоступен.", show_alert=True)
             return
         from aiogram.fsm.context import FSMContext
         try:
@@ -1758,7 +1785,7 @@ async def osint_callback(call: CallbackQuery):
             await st.clear()
         except Exception:
             pass
-        msg, mode = prompts[data]
+        msg, _ = prompts[data]
         await call.message.edit_text(msg, parse_mode="HTML")
         osint_waiting[uid] = (mode, call.message.chat.id, call.message.message_id)
         return
@@ -1782,6 +1809,11 @@ async def osint_text_handler(message: Message):
         return
     mode, chat_id, prompt_msg_id = osint_waiting.pop(uid)
     text = message.text.strip()
+
+    # Проверка доступа к режиму
+    if mode != "instagram" and uid != OWNER_ID and not is_admin(uid):
+        await message.answer("❌ Этот раздел OSINT вам недоступен.")
+        return
 
     bot = message.bot
     try:
