@@ -172,6 +172,15 @@ async def init_db():
                 created TEXT,
                 is_finished INTEGER DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS active_game_sessions (
+                room_id TEXT PRIMARY KEY,
+                game_type TEXT NOT NULL,
+                player1 INTEGER,
+                player2 INTEGER,
+                bet INTEGER,
+                state TEXT DEFAULT 'active',
+                created_at TEXT
+            );
         """)
         await conn.commit()
     finally:
@@ -400,5 +409,61 @@ async def is_casino_admin(user_id: int) -> bool:
             "SELECT 1 FROM casino_admins WHERE admin_id = ?", (user_id,)
         )
         return await cursor.fetchone() is not None
+    finally:
+        await conn.close()
+
+
+# ─── PERSISTENCE: active game sessions ─────────────────────────────
+
+
+async def save_active_game(room_id: str, game_type: str, player1: int, player2: int, bet: int):
+    conn = await get_db()
+    try:
+        await conn.execute(
+            "INSERT OR REPLACE INTO active_game_sessions (room_id, game_type, player1, player2, bet, state, created_at) "
+            "VALUES (?, ?, ?, ?, ?, 'active', ?)",
+            (room_id, game_type, player1, player2, bet, datetime.now().isoformat()),
+        )
+        await conn.commit()
+    finally:
+        await conn.close()
+
+
+async def delete_active_game(room_id: str):
+    conn = await get_db()
+    try:
+        await conn.execute("DELETE FROM active_game_sessions WHERE room_id = ?", (room_id,))
+        await conn.commit()
+    finally:
+        await conn.close()
+
+
+async def refund_orphaned_games():
+    """Возвращает деньги за активные игры, потерянные при перезапуске."""
+    conn = await get_db()
+    try:
+        cursor = await conn.execute("SELECT * FROM active_game_sessions WHERE state = 'active'")
+        orphans = await cursor.fetchall()
+        for row in orphans:
+            game_type = row["game_type"]
+            p1, p2, bet = row["player1"], row["player2"], row["bet"]
+            if game_type == "blackjack":
+                await conn.execute("UPDATE users SET blackjack_balance = blackjack_balance + ? WHERE user_id = ?", (bet, p1))
+                await conn.execute("INSERT INTO transactions (user_id, amount, type, timestamp) VALUES (?, ?, ?, ?)",
+                                   (p1, bet, "refund_restart", datetime.now().isoformat()))
+            elif game_type == "solo":
+                await conn.execute("UPDATE users SET bot_balance = bot_balance + ? WHERE user_id = ?", (bet, p1))
+                await conn.execute("INSERT INTO transactions (user_id, amount, type, timestamp) VALUES (?, ?, ?, ?)",
+                                   (p1, bet, "refund_restart", datetime.now().isoformat()))
+            else:  # pvp
+                await conn.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (bet, p1))
+                await conn.execute("INSERT INTO transactions (user_id, amount, type, timestamp) VALUES (?, ?, ?, ?)",
+                                   (p1, bet, "refund_restart", datetime.now().isoformat()))
+                if p2:
+                    await conn.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (bet, p2))
+                    await conn.execute("INSERT INTO transactions (user_id, amount, type, timestamp) VALUES (?, ?, ?, ?)",
+                                       (p2, bet, "refund_restart", datetime.now().isoformat()))
+            await conn.execute("UPDATE active_game_sessions SET state = 'refunded' WHERE room_id = ?", (row["room_id"],))
+        await conn.commit()
     finally:
         await conn.close()

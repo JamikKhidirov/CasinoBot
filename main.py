@@ -121,6 +121,13 @@ async def main():
     tg_ok, tg_msg = await try_init_client()
     logger.info(tg_msg)
 
+    # Возврат денег за игры, потерянные при перезапуске
+    try:
+        from handlers.casino import refund_orphaned_games
+        await refund_orphaned_games()
+    except Exception as e:
+        logger.warning(f"refund_orphaned_games: {e}")
+
     logger.info("Бот запущен")
 
     retries = 0

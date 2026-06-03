@@ -5,7 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from .base import (
-    get_bot, get_db, get_user, create_user, update_balance, update_bot_balance, get_username,
+    get_bot, get_db, get_user, create_user, update_balance, update_bot_balance, update_blackjack_balance, get_username,
     is_casino_admin, is_owner, has_perm, get_admin_perms, ADMIN_ID, PERMISSIONS, AdminAction, logger,
 )
 from .keyboards import casino_admin_kb
@@ -655,6 +655,17 @@ async def cb_casino_admin_addbot(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
+@router.callback_query(F.data == "casino_admin_addbj")
+async def cb_casino_admin_addbj(call: CallbackQuery, state: FSMContext):
+    if not await is_casino_admin(call.from_user.id):
+        await call.answer(ADMIN_ERROR, show_alert=True)
+        return
+    await state.set_state(AdminAction.waiting_user_id)
+    await state.update_data(action="addbjcoins")
+    await call.message.edit_text("🃏 Введите ID или @username пользователя для пополнения счёта (блэкджек):")
+    await call.answer()
+
+
 @router.message(AdminAction.waiting_user_id)
 async def process_admin_addbot_user(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -668,14 +679,17 @@ async def process_admin_addbot_user(message: Message, state: FSMContext):
         return
 
     await state.update_data(target_id=target_id)
+    action = data.get("action")
+    label = {"addbotcoins": "счёта (бот)", "addbjcoins": "счёта (блэкджек)", "addpvpcoins": "PVP-счёта"}.get(action, "счёта")
     await state.set_state(AdminAction.waiting_amount)
-    await message.answer(f"💰 Введите сумму для пополнения счёта (бот) пользователю <code>{target_id}</code>:", parse_mode="HTML")
+    await message.answer(f"💰 Введите сумму для пополнения {label} пользователю <code>{target_id}</code>:", parse_mode="HTML")
 
 
 @router.message(AdminAction.waiting_amount)
 async def process_admin_addbot_amount(message: Message, state: FSMContext):
     data = await state.get_data()
-    if data.get("action") != "addbotcoins":
+    action = data.get("action", "")
+    if action not in ("addbotcoins", "addbjcoins", "addpvpcoins"):
         await state.clear()
         return
 
@@ -690,11 +704,18 @@ async def process_admin_addbot_amount(message: Message, state: FSMContext):
         await message.answer("❌ Сумма должна быть больше 0.")
         return
 
-    await update_bot_balance(target_id, amount, "admin_add_bot")
+    if action == "addbotcoins":
+        await update_bot_balance(target_id, amount, "admin_add_bot")
+    elif action == "addbjcoins":
+        await update_blackjack_balance(target_id, amount, "admin_add_bj")
+    else:
+        await update_balance(target_id, amount, "admin_add")
     await state.clear()
 
+    labels = {"addbotcoins": "Счёт (бот)", "addbjcoins": "Счёт (блэкджек)", "addpvpcoins": "PVP-счёт"}
+    label = labels.get(action, "Счёт")
     await message.answer(
-        f"✅ Счёт (бот) пользователя <code>{target_id}</code> пополнен на <b>{amount}</b> монет!",
+        f"✅ {label} пользователя <code>{target_id}</code> пополнен на <b>{amount}</b> монет!",
         parse_mode="HTML",
     )
 

@@ -63,7 +63,11 @@ def osint_menu_kb(full_access: bool = True):
             InlineKeyboardButton(text="📶 Wi-Fi", callback_data="osint_wifi"),
         )
     else:
-        builder.row(InlineKeyboardButton(text="📸 Instagram", callback_data="osint_instagram"))
+        builder.row(InlineKeyboardButton(text="✈️ Telegram", callback_data="osint_tg"))
+        builder.row(
+            InlineKeyboardButton(text="🔑 Войти", callback_data="osint_setup_tg"),
+            InlineKeyboardButton(text="🚪 Выйти", callback_data="osint_logout_tg"),
+        )
     builder.row(InlineKeyboardButton(text="◀️ На главную", callback_data="back_main"))
     return builder.as_markup()
 

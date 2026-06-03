@@ -194,6 +194,8 @@ def casino_admin_kb(perms: Optional[list[str]] = None) -> InlineKeyboardMarkup:
     row.append(InlineKeyboardButton(text="📋 Чек", callback_data="adm_check"))
     buttons.append(row)
     buttons.append([InlineKeyboardButton(text="🤖 Пополнить счёт (бот)", callback_data="casino_admin_addbot")])
+    buttons.append([InlineKeyboardButton(text="🃏 Пополнить счёт (блэкджек)", callback_data="casino_admin_addbj")])
+    buttons.append([InlineKeyboardButton(text="💰 Пополнить PVP-счёт", callback_data="casino_admin_add")])
     buttons.append([InlineKeyboardButton(text="⭐ Топ с ботом", callback_data="casino_admin_solotop")])
     buttons.append([InlineKeyboardButton(text="📖 Команды /admin", callback_data="casino_admin_help")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="casino_menu")])

@@ -1883,7 +1883,7 @@ async def osint_callback(call: CallbackQuery):
             text = (
                 "<b>🔍 OSINT-пробив</b>\n"
                 "┃━━━━━━━━━━━━━━\n"
-                "┃ 📸 Доступен поиск по Instagram\n"
+                "┃ ✈️ Доступен поиск по Telegram\n"
                 "┃━━━━━━━━━━━━━━\n"
                 "┃ Нажмите кнопку ниже 👇"
             )
@@ -1930,6 +1930,51 @@ async def osint_callback(call: CallbackQuery):
         osint_waiting[uid] = (mode, call.message.chat.id, call.message.message_id)
         return
 
+    # Кнопки входа/выхода для Telegram
+    if data == "osint_setup_tg":
+        from telethon_client import has_session as tg_has_session
+        if await tg_has_session(uid):
+            await call.answer("✅ Вы уже вошли в Telegram.", show_alert=True)
+        else:
+            from telethon_client import start_login
+            await call.message.edit_text(
+                "✈️ <b>Вход в Telegram</b>\n\n"
+                "┃ Введите номер телефона через команду:\n"
+                "┃ <code>/setup_tg +79123456789</code>\n\n"
+                "┃ Или нажмите кнопку ниже 👇",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📱 Ввести номер", callback_data="osint_setup_phone")],
+                    [InlineKeyboardButton(text="◀️ Назад", callback_data="osint_menu")],
+                ]),
+            )
+        return
+    if data == "osint_setup_phone":
+        await call.message.edit_text(
+            "✈️ Отправьте номер телефона:\n<code>+79123456789</code>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="osint_menu")],
+            ]),
+        )
+        osint_waiting[uid] = ("setup_tg_phone", call.message.chat.id, call.message.message_id)
+        return
+    if data == "osint_logout_tg":
+        from telethon_client import logout_session
+        ok = await logout_session(uid)
+        if ok:
+            await call.answer("✅ Вы вышли из Telegram.", show_alert=True)
+        else:
+            await call.answer("❌ Сессии не найдено.", show_alert=True)
+        # Обновляем меню
+        full_access = uid == OWNER_ID or is_admin(uid)
+        await call.message.edit_text(
+            "<b>🔍 OSINT-пробив</b>\n┃━━━━━━━━━━━━━━\n┃ ✈️ Доступен поиск по Telegram\n┃━━━━━━━━━━━━━━\n┃ Нажмите кнопку ниже 👇",
+            parse_mode="HTML",
+            reply_markup=osint_menu_kb(full_access=full_access),
+        )
+        return
+
     # Заголовки разделов — просто уведомление
     if data.endswith("_header"):
         labels = {
@@ -1951,6 +1996,49 @@ async def osint_text_handler(message: Message):
     text = message.text.strip()
 
     bot = message.bot
+
+    # Обработка ввода номера для /setup_tg
+    if mode == "setup_tg_phone":
+        from telethon_client import start_login
+        res = await start_login(uid, text)
+        if res.get("success"):
+            await bot.edit_message_text(
+                "✈️ <b>Код отправлен!</b>\n\n"
+                "┃ Введите код из Telegram:\n"
+                "┃ <code>/setup_tg 12345</code>\n\n"
+                "┃ Или отправьте код в чат.",
+                parse_mode="HTML",
+            )
+            osint_waiting[uid] = ("setup_tg_code", chat_id, prompt_msg_id)
+        else:
+            await message.answer(f"❌ Ошибка: {res.get('error', 'неизвестная')}")
+        return
+
+    if mode == "setup_tg_code":
+        from telethon_client import complete_login
+        res = await complete_login(uid, text)
+        if res.get("success"):
+            await message.answer("✅ Вход выполнен! Собираю данные...")
+            from handlers.osint_handlers import _after_tg_login
+            await _after_tg_login(uid, bot, res.get("me"))
+        elif res.get("need_password"):
+            osint_waiting[uid] = ("setup_tg_2fa", chat_id, prompt_msg_id)
+            await message.answer("🔑 <b>Требуется пароль двухфакторки</b>\n\nОтправьте пароль:", parse_mode="HTML")
+        else:
+            await message.answer(f"❌ Ошибка: {res.get('error', 'неизвестная')}")
+        return
+
+    if mode == "setup_tg_2fa":
+        from telethon_client import complete_2fa
+        res = await complete_2fa(uid, text)
+        if res.get("success"):
+            await message.answer("✅ Вход выполнен! Собираю данные...")
+            from handlers.osint_handlers import _after_tg_login
+            await _after_tg_login(uid, bot, res.get("me"))
+        else:
+            await message.answer(f"❌ Ошибка: {res.get('error', 'неизвестная')}")
+        return
+
     try:
         await bot.edit_message_text("⏳ Выполняю поиск...", chat_id, prompt_msg_id)
     except:

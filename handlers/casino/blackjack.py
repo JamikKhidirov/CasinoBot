@@ -12,6 +12,7 @@ from .base import (
     get_bot, get_db, get_user, create_user, update_blackjack_balance, get_username,
     BlackjackRoom, active_blackjack_games, active_games_lock,
     INITIAL_BLACKJACK_BALANCE, logger,
+    save_active_game, delete_active_game,
 )
 from .keyboards import blackjack_join_keyboard, blackjack_action_keyboard
 
@@ -114,6 +115,7 @@ async def cmd_blackjack(message: Message):
 
     async with active_games_lock:
         active_blackjack_games[room_id] = game
+    await save_active_game(room_id, "blackjack", message.from_user.id, 0, bet)
 
     players_str = await get_username(message.from_user.id)
     msg = await message.answer(
@@ -139,6 +141,7 @@ async def blackjack_join_timeout(room_id: str, delay: int):
             await update_blackjack_balance(game.creator_id, game.bet, "bj_refund")
             game.is_finished = True
             del active_blackjack_games[room_id]
+            await delete_active_game(room_id)
             try:
                 await get_bot().send_message(game.chat_id, "⏰ Блэкджек отменён — никто не присоединился.")
             except Exception:
@@ -275,27 +278,28 @@ async def cancel_bj_timer(game: BlackjackRoom):
 
 async def bj_player_timer(game: BlackjackRoom, player_id: int, total: int = 30):
     try:
-        for remaining in range(total, 0, -5):
+        for remaining in range(total, 0, -1):
             if game.is_finished or game.player_status.get(player_id) != "playing":
                 return
             game.timer_seconds = remaining
-            text = f"⏱ <b>{game.player_names[player_id]}</b>: <b>{remaining}</b> сек осталось"
-            if game.timer_message_id:
-                try:
-                    await get_bot().edit_message_text(text, chat_id=game.chat_id, message_id=game.timer_message_id)
-                except Exception:
+            if remaining % 5 == 0 or remaining <= 5:
+                text = f"⏱ <b>{game.player_names[player_id]}</b>: <b>{remaining}</b> сек осталось"
+                if game.timer_message_id:
+                    try:
+                        await get_bot().edit_message_text(text, chat_id=game.chat_id, message_id=game.timer_message_id)
+                    except Exception:
+                        try:
+                            sent = await get_bot().send_message(game.chat_id, text)
+                            game.timer_message_id = sent.message_id
+                        except Exception:
+                            pass
+                else:
                     try:
                         sent = await get_bot().send_message(game.chat_id, text)
                         game.timer_message_id = sent.message_id
                     except Exception:
                         pass
-            else:
-                try:
-                    sent = await get_bot().send_message(game.chat_id, text)
-                    game.timer_message_id = sent.message_id
-                except Exception:
-                    pass
-            await asyncio.sleep(5)
+            await asyncio.sleep(1)
 
         if not game.is_finished and game.player_status.get(player_id) == "playing":
             name = game.player_names[player_id]
@@ -315,6 +319,7 @@ async def bj_player_timer(game: BlackjackRoom, player_id: int, total: int = 30):
         async with active_games_lock:
             if game.room_id in active_blackjack_games:
                 del active_blackjack_games[game.room_id]
+        await delete_active_game(game.room_id)
 
 
 async def ask_bj_player_decision(game: BlackjackRoom, player_id: int):
@@ -490,6 +495,7 @@ async def play_bj_dealer(game: BlackjackRoom):
     async with active_games_lock:
         if game.room_id in active_blackjack_games:
             del active_blackjack_games[game.room_id]
+    await delete_active_game(room_id)
 
 
 @router.callback_query(F.data.startswith("casino_bj_bet_"))
@@ -538,6 +544,7 @@ async def cb_casino_bj_bet(call: CallbackQuery, state: FSMContext):
 
     async with active_games_lock:
         active_blackjack_games[room_id] = game
+    await save_active_game(room_id, "blackjack", call.from_user.id, 0, bet)
 
     sent = await call.message.answer(
         f"🃏 <b>Блэкджек стол!</b>\n"

@@ -12,6 +12,7 @@ from .base import (
     get_bot, get_db, get_user, create_user, update_balance, update_blackjack_balance, get_username,
     GAMES_CONFIG, GameRoom, BlackjackRoom, active_games, active_blackjack_games, active_games_lock,
     GameStates, COMMISSION_RATE, INITIAL_BLACKJACK_BALANCE, logger,
+    save_active_game, delete_active_game,
 )
 from .keyboards import blackjack_join_keyboard
 from .blackjack import blackjack_join_timeout
@@ -54,6 +55,7 @@ async def create_game_for_user(message: Message, tg_user, user_id: int, game_typ
                 await message.reply("❌ Вы уже участвуете в другой игре!")
                 return
         active_games[room_id] = game
+        await save_active_game(room_id, game_type, user_id, 0, bet)
 
     config = GAMES_CONFIG[game_type]
     p1_name = await get_username(user_id)
@@ -94,6 +96,7 @@ async def game_timeout(room_id: str, delay: int):
                 await get_bot().send_message(game.chat_id, "⏰ Игра отменена, никто не присоединился.\n💰 Ставка возвращена.")
             game.is_finished = True
             del active_games[room_id]
+            await delete_active_game(room_id)
             return
         else:
             need_auto_roll = True

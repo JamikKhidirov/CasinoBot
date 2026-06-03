@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from .base import (
     get_bot, get_db, get_user, create_user, update_bot_balance, get_username,
     GAMES_CONFIG, INITIAL_BOT_BALANCE, SoloBetState, logger,
+    save_active_game, delete_active_game,
 )
 from .keyboards import solo_bet_selection_kb
 
@@ -103,6 +104,7 @@ async def solo_game_play(message: Message, game_type: str, bet: int, user_id: in
     )
 
     _solo_games[uid] = {"game_type": game_type, "bet": bet, "msg": msg, "player_tag": player_tag, "bal": bal}
+    await save_active_game(f"solo_{uid}", "solo", uid, 0, bet)
 
 
 async def _process_solo_roll(msg: Message, uid: int, game_state: dict):
@@ -246,6 +248,7 @@ async def _process_solo_roll(msg: Message, uid: int, game_state: dict):
 
         # Удаляем из активных игр
         _solo_games.pop(uid, None)
+        await delete_active_game(f"solo_{uid}")
 
 
 def _after_game_kb(game_type: str):
