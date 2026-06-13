@@ -12,6 +12,23 @@ from .keyboards import casino_menu_kb, game_selection_kb, pvp_game_selection_kb,
 router = Router()
 
 
+@router.message(Command("top", "топ"))
+async def cmd_top(message: Message):
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏆 Топ казино (PVP)", callback_data="casino_top_pvp")],
+        [InlineKeyboardButton(text="⭐ Топ с ботом", callback_data="casino_top_solo")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="casino_menu")],
+    ])
+    await message.answer(
+        "<b>🏆 Выберите топ:</b>\n\n"
+        "🏆 <b>Топ казино</b> — игроки с самым большим PVP-балансом\n"
+        "⭐ <b>Топ с ботом</b> — игроки с наибольшими очками в играх с ботом",
+        parse_mode="HTML",
+        reply_markup=markup,
+    )
+
+
 @router.callback_query(F.data == "casino_menu")
 async def cb_casino_menu(call: CallbackQuery):
     user = await get_user(call.from_user.id)

@@ -1,12 +1,70 @@
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Message
 from handlers.user import active_users, waiting_users
 from utils.helpers import is_banned, is_admin, can_read_chats
 from utils.keyboards import main_kb, chat_kb, search_kb
 from config import OWNER_ID
 
 router = Router()
+
+
+@router.message(Command("help"))
+async def cmd_help(message: Message):
+    uid = message.from_user.id
+    is_adm = is_admin(uid)
+    text = (
+        "<b>👋 Команды бота</b>\n\n"
+        "<b>🎲 Анонимный чат</b>\n"
+        "┃ Кнопка «Анонимный чат» — поиск собеседника\n"
+        "┃ «Завершить чат» — выход\n\n"
+        "<b>🎰 Казино (PVP)</b>\n"
+        "┃ <code>/profile</code> или <code>/профиль</code> — профиль\n"
+        "┃ <code>/games</code> или <code>/игры</code> — список игр\n"
+        "┃ <code>/top</code> или <code>/топ</code> — топ игроков\n"
+        "┃ <code>/dice [ставка]</code> или <code>/куб [ставка]</code> — кости\n"
+        "┃ <code>/bowling [ставка]</code> или <code>/боулинг [ставка]</code> — боулинг\n"
+        "┃ <code>/darts [ставка]</code> или <code>/дротики [ставка]</code> — дротики\n"
+        "┃ <code>/basket [ставка]</code> или <code>/баскетбол [ставка]</code> — баскетбол\n"
+        "┃ <code>/football [ставка]</code> или <code>/футбол [ставка]</code> — футбол\n"
+        "┃ <code>/blackjack</code> или <code>/блекджек</code> — блэкджек\n"
+        "┃ <code>/solo</code> или <code>/сботом</code> — игра с ботом\n\n"
+        "<b>🎰 Казино (прочее)</b>\n"
+        "┃ <code>/active</code> или <code>/активные</code> — активные игры\n"
+        "┃ <code>/unlock</code> или <code>/разблокировать</code> — отменить свои игры\n"
+        "┃ <code>/promo</code> — активировать промокод\n"
+        "┃ <code>/solotop</code> — топ с ботом\n"
+    )
+    if is_adm:
+        text += (
+            "<b>🛡 Админ-команды</b>\n"
+            "┃ <code>/stats</code> — статистика\n"
+            "┃ <code>/mod</code> — панель модерации\n"
+            "┃ <code>/ban</code> — забанить\n"
+            "┃ <code>/unban</code> — разбанить\n"
+            "┃ <code>/mute</code> — замутить\n"
+            "┃ <code>/unmute</code> — размутить\n"
+            "┃ <code>/warn</code> — варн\n"
+            "┃ <code>/check</code> — проверить\n"
+            "┃ <code>/warns</code> — варны\n"
+            "┃ <code>/chatlog</code> — переписка\n"
+            "┃ <code>/admin</code> — админ-панель казино\n"
+            "┃ <code>/players</code> — список игроков\n"
+            "┃ <code>/пополнить</code> — пополнить баланс\n"
+            "┃ <code>/одобрить</code> — одобрить депозит\n"
+            "┃ <code>/выводы</code> — запросы на вывод\n"
+            "┃ <code>/addbotcoins</code> — пополнить счёт бота\n"
+            "┃ <code>/createpromo</code> — создать промокод\n"
+            "┃ <code>/deletepromo</code> — удалить промокод\n"
+            "┃ <code>/promo_list</code> — список промокодов\n"
+        )
+    text += (
+        "<b>⚙️ Прочее</b>\n"
+        "┃ <code>/start</code> — главное меню\n"
+        "┃ <code>/help</code> — эта справка"
+    )
+    await message.answer(text, parse_mode="HTML", reply_markup=main_kb(show_admin=is_adm))
 
 
 async def safe_answer(call: CallbackQuery, *args, **kwargs):
@@ -509,42 +567,56 @@ async def cb_chatlog_user(call: CallbackQuery):
 async def cb_help(call: CallbackQuery):
     uid = call.from_user.id
     is_adm = is_admin(uid)
-    parts = ["<b>👋 Команды бота</b>\n"]
-    parts.append(
+    text = (
+        "<b>👋 Команды бота</b>\n\n"
         "<b>🎲 Анонимный чат</b>\n"
         "┃ Кнопка «Анонимный чат» — поиск собеседника\n"
         "┃ «Завершить чат» — выход\n\n"
-        "<b>🎰 Казино</b>\n"
-        "┃ <code>/profile</code> — профиль игрока\n"
-        "┃ <code>/games</code> — игры\n"
-        "┃ <code>/dice [ставка]</code> — кости\n"
-        "┃ <code>/bowling [ставка]</code> — боулинг\n"
-        "┃ <code>/darts [ставка]</code> — дротики\n"
-        "┃ <code>/basket [ставка]</code> — баскетбол\n"
-        "┃ <code>/football [ставка]</code> — футбол\n"
+        "<b>🎰 Казино (PVP)</b>\n"
+        "┃ <code>/profile</code> или <code>/профиль</code> — профиль\n"
+        "┃ <code>/games</code> или <code>/игры</code> — список игр\n"
+        "┃ <code>/top</code> или <code>/топ</code> — топ игроков\n"
+        "┃ <code>/dice [ставка]</code> или <code>/куб [ставка]</code> — кости\n"
+        "┃ <code>/bowling [ставка]</code> или <code>/боулинг [ставка]</code> — боулинг\n"
+        "┃ <code>/darts [ставка]</code> или <code>/дротики [ставка]</code> — дротики\n"
+        "┃ <code>/basket [ставка]</code> или <code>/баскетбол [ставка]</code> — баскетбол\n"
+        "┃ <code>/football [ставка]</code> или <code>/футбол [ставка]</code> — футбол\n"
+        "┃ <code>/blackjack</code> или <code>/блекджек</code> — блэкджек\n"
+        "┃ <code>/solo</code> или <code>/сботом</code> — игра с ботом\n\n"
+        "<b>🎰 Казино (прочее)</b>\n"
+        "┃ <code>/active</code> или <code>/активные</code> — активные игры\n"
+        "┃ <code>/unlock</code> или <code>/разблокировать</code> — отменить свои игры\n"
+        "┃ <code>/promo</code> — активировать промокод\n"
+        "┃ <code>/solotop</code> — топ с ботом\n"
     )
     if is_adm:
-        parts.append(
+        text += (
             "<b>🛡 Админ-команды</b>\n"
-            "┃ <code>/stats</code> — статистика бота\n"
+            "┃ <code>/stats</code> — статистика\n"
             "┃ <code>/mod</code> — панель модерации\n"
             "┃ <code>/ban</code> — забанить\n"
             "┃ <code>/unban</code> — разбанить\n"
             "┃ <code>/mute</code> — замутить\n"
             "┃ <code>/unmute</code> — размутить\n"
-            "┃ <code>/warn</code> — выдать варн\n"
-            "┃ <code>/check</code> — проверить пользователя\n"
-            "┃ <code>/warns</code> — варны пользователя\n"
+            "┃ <code>/warn</code> — варн\n"
+            "┃ <code>/check</code> — проверить\n"
+            "┃ <code>/warns</code> — варны\n"
             "┃ <code>/chatlog</code> — переписка\n"
             "┃ <code>/admin</code> — админ-панель казино\n"
-            "┃ <code>/players</code> — список игроков казино\n"
+            "┃ <code>/players</code> — список игроков\n"
+            "┃ <code>/пополнить</code> — пополнить баланс\n"
+            "┃ <code>/одобрить</code> — одобрить депозит\n"
+            "┃ <code>/выводы</code> — запросы на вывод\n"
+            "┃ <code>/addbotcoins</code> — пополнить счёт бота\n"
+            "┃ <code>/createpromo</code> — создать промокод\n"
+            "┃ <code>/deletepromo</code> — удалить промокод\n"
+            "┃ <code>/promo_list</code> — список промокодов\n"
         )
-    parts.append(
+    text += (
         "<b>⚙️ Прочее</b>\n"
         "┃ <code>/start</code> — главное меню\n"
         "┃ <code>/help</code> — эта справка"
     )
-    text = "\n".join(parts)
     try:
         await call.message.edit_text(text, parse_mode="HTML", reply_markup=main_kb(show_admin=is_adm))
     except Exception:
