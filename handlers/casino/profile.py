@@ -95,7 +95,7 @@ async def cb_deposit_preset(call: CallbackQuery, state: FSMContext):
 
 async def _submit_deposit_request(user_id: int, amount: int, msg: Message):
     if not (100 <= amount <= 10000):
-        await msg.edit_text("❌ Сумма должна быть от 100 до 10000 монет.")
+        await msg.answer("❌ Сумма должна быть от 100 до 10000 монет.")
         return
     conn = await get_db()
     deposit_id = None
@@ -106,7 +106,7 @@ async def _submit_deposit_request(user_id: int, amount: int, msg: Message):
         )
         existing = await cursor.fetchone()
         if existing:
-            await msg.edit_text("❌ У вас уже есть активный запрос на пополнение!")
+            await msg.answer("❌ У вас уже есть активный запрос на пополнение!")
             return
         cursor = await conn.execute(
             "INSERT INTO deposit_requests (user_id, amount, created) VALUES (?, ?, ?)",
@@ -118,9 +118,9 @@ async def _submit_deposit_request(user_id: int, amount: int, msg: Message):
         await conn.close()
     if deposit_id:
         await send_admin_notification(user_id, amount, deposit_id)
-        await msg.edit_text(f"✅ Запрос на <b>{amount}</b> монет отправлен администратору.\nОжидайте реквизитов для оплаты.", parse_mode="HTML")
+        await msg.answer(f"✅ Запрос на <b>{amount}</b> монет отправлен администратору.\nОжидайте реквизитов для оплаты.", parse_mode="HTML")
     else:
-        await msg.edit_text("❌ Ошибка при создании запроса.")
+        await msg.answer("❌ Ошибка при создании запроса.")
 
 
 @router.message(DepositState.waiting_for_amount)
@@ -130,8 +130,8 @@ async def process_deposit_amount(message: Message, state: FSMContext):
     except (ValueError, TypeError):
         await message.answer("❌ Введите целое число от 100 до 10000.")
         return
-    await state.clear()
     await _submit_deposit_request(message.from_user.id, amount, message)
+    await state.clear()
 
 
 async def send_admin_notification(user_id: int, amount: int, deposit_id: int):
@@ -168,12 +168,15 @@ async def cb_provide_details(call: CallbackQuery, state: FSMContext):
     conn = await get_db()
     try:
         cursor = await conn.execute(
-            "SELECT user_id, amount FROM deposit_requests WHERE id = ? AND status = 'pending'",
+            "SELECT user_id, amount, status FROM deposit_requests WHERE id = ?",
             (deposit_id,),
         )
         row = await cursor.fetchone()
         if not row:
-            await call.answer("❌ Запрос уже обработан.", show_alert=True)
+            await call.answer("❌ Запрос не найден.", show_alert=True)
+            return
+        if row["status"] != "pending":
+            await call.answer(f"❌ Запрос уже обработан (статус: {row['status']}).", show_alert=True)
             return
     finally:
         await conn.close()
@@ -250,14 +253,18 @@ async def process_payment_details(message: Message, state: FSMContext):
 async def cb_user_paid(call: CallbackQuery):
     deposit_id = int(call.data.split("_", 1)[1])
     conn = await get_db()
+    row = None
     try:
         cursor = await conn.execute(
-            "SELECT user_id, amount FROM deposit_requests WHERE id = ? AND status = 'payment_sent'",
+            "SELECT user_id, amount, status FROM deposit_requests WHERE id = ?",
             (deposit_id,),
         )
         row = await cursor.fetchone()
         if not row:
-            await call.answer("❌ Запрос уже обработан.", show_alert=True)
+            await call.answer("❌ Запрос не найден.", show_alert=True)
+            return
+        if row["status"] != "payment_sent":
+            await call.answer(f"❌ Запрос уже обработан (статус: {row['status']}).", show_alert=True)
             return
 
         await conn.execute(
@@ -268,6 +275,8 @@ async def cb_user_paid(call: CallbackQuery):
     finally:
         await conn.close()
 
+    if not row:
+        return
     approve_markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"approve_{deposit_id}"),
          InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_{deposit_id}")]
@@ -298,12 +307,15 @@ async def cb_approve(call: CallbackQuery):
     conn = await get_db()
     try:
         cursor = await conn.execute(
-            "SELECT user_id, amount FROM deposit_requests WHERE id = ? AND status = 'paid'",
+            "SELECT user_id, amount, status FROM deposit_requests WHERE id = ?",
             (deposit_id,),
         )
         row = await cursor.fetchone()
         if not row:
-            await call.answer("❌ Запрос уже обработан.", show_alert=True)
+            await call.answer("❌ Запрос не найден.", show_alert=True)
+            return
+        if row["status"] != "paid":
+            await call.answer(f"❌ Запрос уже обработан (статус: {row['status']}).", show_alert=True)
             return
 
         user_id = row["user_id"]

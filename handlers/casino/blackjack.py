@@ -115,7 +115,6 @@ async def cmd_blackjack(message: Message):
 
     async with active_games_lock:
         active_blackjack_games[room_id] = game
-    await save_active_game(room_id, "blackjack", message.from_user.id, 0, bet)
 
     players_str = await get_username(message.from_user.id)
     msg = await message.answer(
@@ -128,6 +127,7 @@ async def cmd_blackjack(message: Message):
     game.join_message_id = msg.message_id
     game.phase = "joining"
 
+    await save_active_game(room_id, "blackjack", message.from_user.id, 0, bet, message.chat.id, msg.message_id)
     asyncio.ensure_future(blackjack_join_timeout(room_id, 60))
 
 
@@ -147,11 +147,32 @@ async def blackjack_join_timeout(room_id: str, delay: int):
 @router.callback_query(F.data.startswith("bj_join_"))
 async def cb_bj_join(call: CallbackQuery):
     room_id = call.data.split("_", 2)[2]
+    logger.info(f"bj_join: room_id={room_id}, uid={call.from_user.id}, in_memory={room_id in active_blackjack_games}")
     async with active_games_lock:
         game = active_blackjack_games.get(room_id)
         if not game or game.is_finished or game.phase != "joining":
-            await call.answer("❌ Игра уже началась или завершена!", show_alert=True)
-            return
+            try:
+                conn = await get_db()
+                cur = await conn.execute("SELECT * FROM active_game_sessions WHERE room_id = ?", (room_id,))
+                row = await cur.fetchone()
+                await conn.close()
+                if row and row["game_type"] == "blackjack":
+                    if row["state"] == "refunded":
+                        await call.answer("❌ Игра отменена при перезапуске.", show_alert=True)
+                        return
+                    game = BlackjackRoom(room_id, row["bet"], row["player1"], call.message.chat.id)
+                    game.players[row["player1"]] = []
+                    game.player_names[row["player1"]] = await get_username(row["player1"])
+                    game.phase = "joining"
+                    active_blackjack_games[room_id] = game
+                    logger.info(f"bj_join: recovered game {room_id} from DB")
+                else:
+                    await call.answer("❌ Игра уже началась или завершена!", show_alert=True)
+                    return
+            except Exception as e:
+                logger.exception(f"bj_join recovery error: {e}")
+                await call.answer("❌ Игра уже началась или завершена!", show_alert=True)
+                return
 
         if call.from_user.id in game.players:
             await call.answer("✅ Вы уже за этим столом!", show_alert=True)
@@ -197,6 +218,7 @@ async def cb_bj_join(call: CallbackQuery):
 @router.callback_query(F.data.startswith("bj_start_"))
 async def cb_bj_start(call: CallbackQuery):
     room_id = call.data.replace("bj_start_", "")
+    logger.info(f"bj_start: room_id={room_id}, uid={call.from_user.id}, in_memory={room_id in active_blackjack_games}")
     async with active_games_lock:
         game = active_blackjack_games.get(room_id)
         if not game or game.is_finished:
@@ -570,7 +592,6 @@ async def cb_casino_bj_bet(call: CallbackQuery, state: FSMContext):
 
     async with active_games_lock:
         active_blackjack_games[room_id] = game
-    await save_active_game(room_id, "blackjack", call.from_user.id, 0, bet)
 
     sent = await call.message.answer(
         f"🃏 <b>Блэкджек стол!</b>\n"
@@ -585,4 +606,5 @@ async def cb_casino_bj_bet(call: CallbackQuery, state: FSMContext):
     game.phase = "joining"
     await call.message.delete()
     await call.answer()
+    await save_active_game(room_id, "blackjack", call.from_user.id, 0, bet, call.message.chat.id, sent.message_id)
     asyncio.ensure_future(blackjack_join_timeout(room_id, 60))

@@ -21,6 +21,7 @@ _solo_games: dict[int, dict] = {}
 
 
 @router.message(Command("сботом"))
+@router.message(Command("solo"))
 async def cmd_solo_bot(message: Message):
     if message.chat.type != "private":
         await message.reply("🤖 Игра с ботом доступна только в ЛС! Напишите боту в личку.")
@@ -104,7 +105,7 @@ async def solo_game_play(message: Message, game_type: str, bet: int, user_id: in
     )
 
     _solo_games[uid] = {"game_type": game_type, "bet": bet, "msg": msg, "player_tag": player_tag, "bal": bal}
-    await save_active_game(f"solo_{uid}", "solo", uid, 0, bet)
+    await save_active_game(f"solo_{uid}", "solo", uid, 0, bet, message.chat.id, msg.message_id)
 
 
 async def _process_solo_roll(msg: Message, uid: int, game_state: dict):

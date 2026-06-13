@@ -206,6 +206,17 @@ async def cb_rps_pick(call: CallbackQuery):
     async with active_games_lock:
         game = active_games.get(room_id)
         if not game or game.is_finished:
+            logger.warning(f"cb_rps_pick: game {room_id} not in memory (uid={uid})")
+            try:
+                db = await get_db()
+                cur = await db.execute("SELECT state FROM active_game_sessions WHERE room_id = ?", (room_id,))
+                row = await cur.fetchone()
+                await db.close()
+                if row and row["state"] == "refunded":
+                    await call.answer("❌ Игра отменена при перезапуске бота.", show_alert=True)
+                    return
+            except Exception:
+                pass
             await call.answer("❌ Игра завершена.", show_alert=True)
             return
         if uid not in (game.player1, game.player2):
@@ -308,7 +319,6 @@ async def cb_rps_bet(call: CallbackQuery, state: FSMContext):
                 await call.answer("❌ Вы уже участвуете в другой игре!", show_alert=True)
                 return
         active_games[room_id] = game
-    await save_active_game(room_id, "rps", call.from_user.id, 0, bet)
 
     bot_user = await get_bot().me()
     pm_url = f"https://t.me/{bot_user.username}"
@@ -327,6 +337,7 @@ async def cb_rps_bet(call: CallbackQuery, state: FSMContext):
         ]),
     )
     game.message_id = sent.message_id
+    await save_active_game(room_id, "rps", call.from_user.id, 0, bet, call.message.chat.id, sent.message_id)
     await call.message.delete()
     await call.answer()
     asyncio.ensure_future(_rps_join_timeout(room_id, 60))
@@ -360,6 +371,17 @@ async def cb_rps_join(call: CallbackQuery):
     async with active_games_lock:
         game = active_games.get(room_id)
         if not game:
+            logger.warning(f"cb_rps_join: game {room_id} not found (joiner={uid})")
+            try:
+                db = await get_db()
+                cur = await db.execute("SELECT state FROM active_game_sessions WHERE room_id = ?", (room_id,))
+                row = await cur.fetchone()
+                await db.close()
+                if row and row["state"] == "refunded":
+                    await call.answer("❌ Игра отменена при перезапуске бота.", show_alert=True)
+                    return
+            except Exception:
+                pass
             await call.answer("❌ Игра не найдена.", show_alert=True)
             return
         if game.is_finished:
@@ -399,6 +421,17 @@ async def cb_rps_cancel(call: CallbackQuery):
     async with active_games_lock:
         game = active_games.get(room_id)
         if not game:
+            logger.warning(f"cb_rps_cancel: game {room_id} not found (uid={uid})")
+            try:
+                db = await get_db()
+                cur = await db.execute("SELECT state FROM active_game_sessions WHERE room_id = ?", (room_id,))
+                row = await cur.fetchone()
+                await db.close()
+                if row and row["state"] == "refunded":
+                    await call.answer("❌ Игра отменена при перезапуске бота.", show_alert=True)
+                    return
+            except Exception:
+                pass
             await call.answer("❌ Игра не найдена.", show_alert=True)
             return
         if uid != game.player1:

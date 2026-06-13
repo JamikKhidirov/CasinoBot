@@ -751,6 +751,20 @@ async def cb_casino_admin_solotop(call: CallbackQuery):
     await call.answer()
 
 
+@router.message(Command("admin"))
+async def cmd_casino_admin(message: Message):
+    if not await is_casino_admin(message.from_user.id):
+        await message.reply("❌ Доступ запрещён!")
+        return
+    perms = await get_admin_perms(message.from_user.id)
+    await message.reply(
+        "<b>⚙️ Админ-панель казино</b>\n\n"
+        "Выберите действие:",
+        parse_mode="HTML",
+        reply_markup=casino_admin_kb(perms),
+    )
+
+
 @router.message(Command("addbotcoins"))
 async def cmd_addbotcoins(message: Message):
     if not await is_casino_admin(message.from_user.id):

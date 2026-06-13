@@ -13,6 +13,9 @@ def main_kb(show_chat: bool = True, show_admin: bool = False):
         InlineKeyboardButton(text="👤 Профиль", callback_data="myprofile"),
         InlineKeyboardButton(text="🏆 Топ", callback_data="casino_top"),
     )
+    builder.row(
+        InlineKeyboardButton(text="💳 Пополнить", callback_data="deposit"),
+    )
     if show_admin:
         builder.row(InlineKeyboardButton(text="🛡 Админ-панель", callback_data="admin_panel"))
     builder.row(

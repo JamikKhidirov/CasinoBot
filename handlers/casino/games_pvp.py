@@ -55,7 +55,6 @@ async def create_game_for_user(message: Message, tg_user, user_id: int, game_typ
                 await message.reply("❌ Вы уже участвуете в другой игре!")
                 return
         active_games[room_id] = game
-        await save_active_game(room_id, game_type, user_id, 0, bet)
 
     config = GAMES_CONFIG[game_type]
     p1_name = await get_username(user_id)
@@ -66,18 +65,17 @@ async def create_game_for_user(message: Message, tg_user, user_id: int, game_typ
         f"⏳ Ожидание второго игрока...\n\n"
         f"Игрок 1: {p1_name}\n"
         f"Места: 1/2\n\n"
-        f"Игра отменится через 30 секунд, если никто не присоединится.",
+        f"Игра отменится через 60 секунд, если никто не присоединится.",
         reply_markup=game_keyboard(room_id, user_id),
     )
     game.message_id = sent.message_id
 
-    asyncio.ensure_future(game_timeout(room_id, 30))
+    await save_active_game(room_id, game_type, user_id, 0, bet, message.chat.id, sent.message_id)
+    asyncio.ensure_future(game_timeout(room_id, 60))
 
 
 async def game_timeout(room_id: str, delay: int):
     await asyncio.sleep(delay)
-    game = None
-    need_auto_roll = False
 
     async with active_games_lock:
         game = active_games.get(room_id)
@@ -97,12 +95,6 @@ async def game_timeout(room_id: str, delay: int):
             game.is_finished = True
             del active_games[room_id]
             await delete_active_game(room_id)
-            return
-        else:
-            need_auto_roll = True
-
-    if need_auto_roll and game:
-        await auto_roll_dice(game)
 
 
 @router.callback_query(F.data.startswith("join_"))
@@ -119,8 +111,25 @@ async def cb_join_game(call: CallbackQuery):
                     return
 
             game = active_games.get(room_id)
-            if not game or game.is_finished or game.player2 is not None:
-                await call.answer("❌ Игра уже началась или завершена!", show_alert=True)
+            if not game:
+                logger.warning(f"cb_join_game: game {room_id} not found (joiner={joiner_id})")
+                try:
+                    db = await get_db()
+                    cur = await db.execute("SELECT state FROM active_game_sessions WHERE room_id = ?", (room_id,))
+                    row = await cur.fetchone()
+                    await db.close()
+                    if row and row["state"] == "refunded":
+                        await call.answer("❌ Игра отменена при перезапуске бота.", show_alert=True)
+                        return
+                except Exception:
+                    pass
+                await call.answer("❌ Игра не найдена (возможно, уже завершена).", show_alert=True)
+                return
+            if game.is_finished:
+                await call.answer("❌ Эта игра уже завершена.", show_alert=True)
+                return
+            if game.player2 is not None:
+                await call.answer("❌ К этой игре уже присоединились.", show_alert=True)
                 return
 
             user = await get_user(joiner_id)
@@ -198,9 +207,40 @@ async def start_game(game: GameRoom):
             game.message_id = sent.message_id
 
         await ask_for_dice_roll(game, game.player1)
+        asyncio.ensure_future(_turn_timeout(game, game.player1, 60))
 
     except Exception as e:
         logger.error(f"Ошибка в start_game: {e}")
+
+
+async def _turn_timeout(game: GameRoom, player_id: int, delay: int):
+    """Авто-бросок, если игрок не сделал ход за отведённое время."""
+    await asyncio.sleep(delay)
+    async with active_games_lock:
+        g = active_games.get(game.room_id)
+        if not g or g.is_finished:
+            return
+        if player_id in g.results and g.results[player_id] >= 0:
+            return
+        current = g.player1 if g.player1_turn else g.player2
+        if current != player_id:
+            return
+        g.results[player_id] = -1
+    config = GAMES_CONFIG[g.game_type]
+    try:
+        await get_bot().send_message(g.chat_id, f"⏰ {await get_username(player_id)} не сделал ход. Авто-бросок...")
+        auto_roll_msg = await get_bot().send_dice(g.chat_id, emoji=config["emoji"])
+        stored = auto_roll_msg.dice.value - 1 if g.game_type in ("дротики", "боулинг") else auto_roll_msg.dice.value
+        g.results[player_id] = stored
+        if len(g.results) == 2 and all(v >= 0 for v in g.results.values()):
+            await determine_winner(g)
+        else:
+            g.player1_turn = not g.player1_turn
+            next_player = g.player2 if player_id == g.player1 else g.player1
+            await send_turn_notification(g, next_player)
+            asyncio.ensure_future(_turn_timeout(g, next_player, 60))
+    except Exception as e:
+        logger.error(f"Ошибка в _turn_timeout: {e}")
 
 
 async def ask_for_dice_roll(game: GameRoom, player_id: int):
@@ -235,6 +275,18 @@ async def cb_roll_dice(call: CallbackQuery):
         async with active_games_lock:
             game = active_games.get(room_id)
             if not game or game.is_finished:
+                logger.warning(f"cb_roll_dice: game {room_id} not in memory (uid={call.from_user.id})")
+                # DB fallback — возможно, игра отменена при перезапуске
+                try:
+                    db = await get_db()
+                    cur = await db.execute("SELECT state FROM active_game_sessions WHERE room_id = ?", (room_id,))
+                    row = await cur.fetchone()
+                    await db.close()
+                    if row and row["state"] == "refunded":
+                        await call.answer("❌ Игра была отменена из-за перезапуска бота. Ставка возвращена.", show_alert=True)
+                        return
+                except Exception:
+                    pass
                 await call.answer("❌ Игра завершена или не найдена!", show_alert=True)
                 return
 
@@ -489,7 +541,14 @@ async def determine_winner(game: GameRoom):
             if game.player2_button_message_id and game.player2:
                 await get_bot().delete_message(game.player2, game.player2_button_message_id)
             if game.message_id:
-                await get_bot().delete_message(game.chat_id, game.message_id)
+                try:
+                    await get_bot().edit_message_text(
+                        chat_id=game.chat_id,
+                        message_id=game.message_id,
+                        text=f"🏁 {GAMES_CONFIG[game.game_type]['emoji']} Игра завершена."
+                    )
+                except Exception:
+                    await get_bot().delete_message(game.chat_id, game.message_id)
         except Exception as e:
             logger.error(f"Ошибка при удалении сообщений: {e}")
 
@@ -613,13 +672,30 @@ async def handle_game_emoji(message: Message):
         pass
 
 
+_CMD_ALIASES = {
+    "dice": "куб",
+    "кости": "куб",
+    "bowling": "боулинг",
+    "darts": "дротики",
+    "basket": "баскетбол",
+    "football": "футбол",
+}
+
+
 @router.message(Command("куб"))
 @router.message(Command("боулинг"))
 @router.message(Command("дротики"))
 @router.message(Command("баскетбол"))
 @router.message(Command("футбол"))
+@router.message(Command("dice"))
+@router.message(Command("bowling"))
+@router.message(Command("darts"))
+@router.message(Command("basket"))
+@router.message(Command("football"))
+@router.message(Command("кости"))
 async def cmd_pvp_game(message: Message):
     cmd = message.text.split()[0][1:].lower()
+    cmd = _CMD_ALIASES.get(cmd, cmd)
     game_type = None
     for gt, cfg in GAMES_CONFIG.items():
         if cfg["command"] == cmd:
@@ -763,6 +839,7 @@ async def process_custom_bet(message: Message, state: FSMContext):
         )
         game.join_message_id = sent.message_id
         game.phase = "joining"
+        await save_active_game(room_id, "blackjack", message.from_user.id, 0, bet, message.chat.id, sent.message_id)
         asyncio.ensure_future(blackjack_join_timeout(room_id, 60))
         return
 
@@ -788,9 +865,8 @@ async def process_custom_bet(message: Message, state: FSMContext):
                     await message.answer("❌ Вы уже участвуете в другой игре!")
                     return
             active_games[room_id] = game
-        await save_active_game(room_id, "rps", message.from_user.id, 0, bet)
         p1_name = await get_username(message.from_user.id)
-        from .keyboards import InlineKeyboardMarkup, InlineKeyboardButton
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         bot_user = await get_bot().me()
         pm_url = f"https://t.me/{bot_user.username}"
         sent = await message.answer(
@@ -807,6 +883,7 @@ async def process_custom_bet(message: Message, state: FSMContext):
             ]),
         )
         game.message_id = sent.message_id
+        await save_active_game(room_id, "rps", message.from_user.id, 0, bet, message.chat.id, sent.message_id)
         from .games_rps import _rps_join_timeout
         asyncio.ensure_future(_rps_join_timeout(room_id, 60))
         return

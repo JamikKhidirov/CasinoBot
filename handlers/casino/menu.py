@@ -18,13 +18,11 @@ async def cb_casino_menu(call: CallbackQuery):
     if not user:
         await create_user(call.from_user)
         user = await get_user(call.from_user.id)
-    bj = user["blackjack_balance"] if user["blackjack_balance"] else 1000
     bbot = user["bot_balance"] if user["bot_balance"] else 500
     await call.message.edit_text(
         f"🎰 <b>Меню казино</b>\n\n"
-        f"┃ 💰 <b>PVP:</b> {user['balance']} 🪙\n"
+        f"┃ 💰 <b>Баланс (PVP/Блэкджек):</b> {user['balance']} 🪙\n"
         f"┃ 🤖 <b>Ваш счёт (игра с ботом):</b> {bbot} 🤖\n"
-        f"┃ 🃏 <b>Блэкджек:</b> {bj} 🪙\n"
         f"┃ 🏆 <b>Побед:</b> {user['wins']} / {user['games_played']} игр",
         parse_mode="HTML",
         reply_markup=casino_menu_kb(user_id=call.from_user.id),
@@ -51,7 +49,6 @@ async def cb_casino_profile(call: CallbackQuery):
         await create_user(call.from_user)
         user = await get_user(call.from_user.id)
 
-    bj_bal = user["blackjack_balance"] if user["blackjack_balance"] else 1000
     bbot = user["bot_balance"] if user["bot_balance"] else 500
     conn = await get_db()
     solo_row = None
@@ -67,9 +64,8 @@ async def cb_casino_profile(call: CallbackQuery):
     text = (
         f"<b>📊 Профиль игрока</b> {call.from_user.first_name}\n\n"
         f"┃ 🆔 ID: <code>{user['user_id']}</code>\n"
-        f"┃ 💰 <b>PVP баланс:</b> {user['balance']} 🪙\n"
+        f"┃ 💰 <b>Баланс (PVP/Блэкджек):</b> {user['balance']} 🪙\n"
         f"┃ 🤖 <b>Игра с ботом:</b> {bbot} 🤖\n"
-        f"┃ 🃏 <b>Блэкджек:</b> {bj_bal} 🪙\n"
         f"┃ ⭐ <b>Соло очки:</b> {solo_score} ({solo_games} игр)\n"
         f"┃ 🎮 <b>Сыграно PVP игр:</b> {user['games_played']}\n"
         f"┃ 🏆 <b>Побед PVP:</b> {user['wins']}\n"
