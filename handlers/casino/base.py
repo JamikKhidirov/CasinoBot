@@ -20,7 +20,6 @@ COMMISSION_RATE = Decimal("0.1")
 DATA_DIR = "/data" if os.path.exists("/data") else "."
 DB_NAME = os.path.join(DATA_DIR, "casino.db")
 INITIAL_BALANCE = 1000
-INITIAL_BLACKJACK_BALANCE = 1000
 INITIAL_BOT_BALANCE = 500
 DAILY_BONUS = 500
 DAILY_BOT_BONUS = 200
@@ -96,7 +95,6 @@ async def init_db():
                 username TEXT,
                 balance INTEGER DEFAULT 1000,
                 bot_balance INTEGER DEFAULT 500,
-                blackjack_balance INTEGER DEFAULT 1000,
                 games_played INTEGER DEFAULT 0,
                 wins INTEGER DEFAULT 0,
                 last_bonus DATE,
@@ -190,7 +188,6 @@ async def init_db():
     col_migrations = [
         ("payment_details", "TEXT"),
         ("bot_balance", "INTEGER DEFAULT 500"),
-        ("blackjack_balance", "INTEGER DEFAULT 1000"),
         ("is_muted", "INTEGER DEFAULT 0"),
         ("muted_until", "TEXT"),
     ]
@@ -221,8 +218,8 @@ async def create_user(tg_user) -> None:
     conn = await get_db()
     try:
         await conn.execute(
-            "INSERT OR IGNORE INTO users (user_id, username, balance, bot_balance, blackjack_balance) VALUES (?, ?, ?, ?, ?)",
-            (tg_user.id, username, INITIAL_BALANCE, INITIAL_BOT_BALANCE, INITIAL_BLACKJACK_BALANCE),
+            "INSERT OR IGNORE INTO users (user_id, username, balance, bot_balance) VALUES (?, ?, ?, ?)",
+            (tg_user.id, username, INITIAL_BALANCE, INITIAL_BOT_BALANCE),
         )
         await conn.commit()
     finally:
@@ -235,23 +232,6 @@ async def update_balance(user_id: int, amount: int, tr_type: str) -> None:
         timestamp = datetime.now().isoformat()
         await conn.execute(
             "UPDATE users SET balance = balance + ? WHERE user_id = ?",
-            (amount, user_id),
-        )
-        await conn.execute(
-            "INSERT INTO transactions (user_id, amount, type, timestamp) VALUES (?, ?, ?, ?)",
-            (user_id, amount, tr_type, timestamp),
-        )
-        await conn.commit()
-    finally:
-        await conn.close()
-
-
-async def update_blackjack_balance(user_id: int, amount: int, tr_type: str) -> None:
-    conn = await get_db()
-    try:
-        timestamp = datetime.now().isoformat()
-        await conn.execute(
-            "UPDATE users SET blackjack_balance = blackjack_balance + ? WHERE user_id = ?",
             (amount, user_id),
         )
         await conn.execute(
@@ -448,7 +428,7 @@ async def refund_orphaned_games():
             game_type = row["game_type"]
             p1, p2, bet = row["player1"], row["player2"], row["bet"]
             if game_type == "blackjack":
-                await conn.execute("UPDATE users SET blackjack_balance = blackjack_balance + ? WHERE user_id = ?", (bet, p1))
+                await conn.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (bet, p1))
                 await conn.execute("INSERT INTO transactions (user_id, amount, type, timestamp) VALUES (?, ?, ?, ?)",
                                    (p1, bet, "refund_restart", datetime.now().isoformat()))
             elif game_type == "solo":

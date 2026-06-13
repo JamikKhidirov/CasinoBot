@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from handlers.user import active_users, waiting_users
-from utils.helpers import is_banned, is_admin, is_dev, can_read_chats
+from utils.helpers import is_banned, is_admin, can_read_chats
 from utils.keyboards import main_kb, chat_kb, search_kb
 from config import OWNER_ID
 
@@ -14,10 +14,6 @@ async def safe_answer(call: CallbackQuery, *args, **kwargs):
         await safe_answer(call, *args, **kwargs)
     except Exception:
         pass
-
-
-def _show_osint(uid: int) -> bool:
-    return is_dev(uid)
 
 
 @router.callback_query(F.data == "start_chat")
@@ -68,10 +64,9 @@ async def cb_leave_chat(call: CallbackQuery):
         return
     partner = active_users.pop(uid)
     active_users.pop(partner, None)
-    so = _show_osint(uid)
     sa = is_admin(uid)
-    await call.bot.send_message(partner, "❌ Собеседник вышел.", reply_markup=main_kb(show_osint=so, show_admin=sa))
-    await call.message.edit_text("👋 Чат завершён.", reply_markup=main_kb(show_osint=so, show_admin=sa))
+    await call.bot.send_message(partner, "❌ Собеседник вышел.", reply_markup=main_kb(show_admin=sa))
+    await call.message.edit_text("👋 Чат завершён.", reply_markup=main_kb(show_admin=sa))
 
 
 @router.callback_query(F.data == "cancel_search")
@@ -81,7 +76,7 @@ async def cb_cancel_search(call: CallbackQuery):
         await safe_answer(call, "❌ Вы не в поиске.", show_alert=True)
         return
     waiting_users.remove(uid)
-    await call.message.edit_text("❌ Поиск отменён.", reply_markup=main_kb(show_osint=_show_osint(uid), show_admin=is_admin(uid)))
+    await call.message.edit_text("❌ Поиск отменён.", reply_markup=main_kb(show_admin=is_admin(uid)))
     await safe_answer(call)
 
 
@@ -101,26 +96,22 @@ async def cb_my_profile(call: CallbackQuery):
         )
     else:
         text = f"👤 Профиль\n\n🆔 ID: {uid}\n📝 Зарегистрируйтесь через /start"
-    await call.message.edit_text(text, reply_markup=main_kb(show_osint=_show_osint(uid), show_admin=is_admin(uid)))
+    await call.message.edit_text(text, reply_markup=main_kb(show_admin=is_admin(uid)))
     await safe_answer(call)
 
 
 @router.callback_query(F.data == "mystats")
 async def cb_my_stats(call: CallbackQuery):
     uid = call.from_user.id
-    import db
-    db.cur.execute("SELECT COUNT(*) FROM osint_logs WHERE user_id = ?", (uid,))
-    osint_count = db.cur.fetchone()[0]
     from handlers.user import active_users
     in_chat = "✅ Да" if uid in active_users else "❌ Нет"
     text = (
         f"📊 Статистика\n\n"
         f"🆔 ID: {uid}\n"
-        f"🔍 OSINT-запросов: {osint_count}\n"
         f"💬 В чате: {in_chat}\n"
         f"🎰 Казино: используйте /казино"
     )
-    await call.message.edit_text(text, reply_markup=main_kb(show_osint=_show_osint(uid), show_admin=is_admin(uid)))
+    await call.message.edit_text(text, reply_markup=main_kb(show_admin=is_admin(uid)))
     await safe_answer(call)
 
 
@@ -205,7 +196,7 @@ async def cb_back_main(call: CallbackQuery):
     uid = call.from_user.id
     show_chat = call.message.chat.type == "private"
     try:
-        await call.message.edit_text("👋 Главное меню", reply_markup=main_kb(show_chat=show_chat, show_osint=_show_osint(uid), show_admin=is_admin(uid)))
+        await call.message.edit_text("👋 Главное меню", reply_markup=main_kb(show_chat=show_chat, show_admin=is_admin(uid)))
     except Exception:
         pass
     try:
@@ -271,17 +262,6 @@ async def cb_admin_commands(call: CallbackQuery):
     parts.append("/football [ставка] — футбол")
     parts.append("/active — активные игры")
     parts.append("/unlock — отменить свои игры")
-
-    # OSINT (только для разработчика)
-    if is_dev_user:
-        parts.append("\n<b>🔍 OSINT-пробив</b>")
-        parts.append("/phone [номер] — пробив телефона")
-        parts.append("/hackphone [номер] — хакерский скан")
-        parts.append("/card [номер] — пробив карты по BIN")
-        parts.append("/email [email] — пробив email")
-        parts.append("/user [username] — поиск по соцсетям")
-        parts.append("/ip [ip] — геолокация IP")
-        parts.append("/domain [домен] — инфо по домену")
 
     # Админ (для всех админов)
     parts.append("\n<b>🛡 Админ-команды</b>")
@@ -507,20 +487,8 @@ async def cb_chatlog_user(call: CallbackQuery):
 @router.callback_query(F.data == "help")
 async def cb_help(call: CallbackQuery):
     uid = call.from_user.id
-    show_osint = _show_osint(uid)
     is_adm = is_admin(uid)
     parts = ["<b>👋 Команды бота</b>\n"]
-    if show_osint:
-        parts.append(
-            "<b>🔍 OSINT-пробив (только разработчик)</b>\n"
-            "┃ <code>/phone</code> — пробив телефона\n"
-            "┃ <code>/hackphone</code> — хакерский скан номера\n"
-            "┃ <code>/card</code> — пробив банковской карты\n"
-            "┃ <code>/email</code> — пробив email\n"
-            "┃ <code>/user</code> — поиск по соцсетям\n"
-            "┃ <code>/ip</code> — геолокация IP\n"
-            "┃ <code>/domain</code> — инфо по домену\n"
-        )
     parts.append(
         "<b>🎲 Анонимный чат</b>\n"
         "┃ Кнопка «Анонимный чат» — поиск собеседника\n"
@@ -555,11 +523,9 @@ async def cb_help(call: CallbackQuery):
         "┃ <code>/start</code> — главное меню\n"
         "┃ <code>/help</code> — эта справка"
     )
-    if show_osint:
-        parts.append("💡 <code>/phone +79123456789</code> — Быстрый пробив")
     text = "\n".join(parts)
     try:
-        await call.message.edit_text(text, parse_mode="HTML", reply_markup=main_kb(show_osint=show_osint, show_admin=is_adm))
+        await call.message.edit_text(text, parse_mode="HTML", reply_markup=main_kb(show_admin=is_adm))
     except Exception:
-        await call.message.answer(text, parse_mode="HTML", reply_markup=main_kb(show_osint=show_osint, show_admin=is_adm))
+        await call.message.answer(text, parse_mode="HTML", reply_markup=main_kb(show_admin=is_adm))
     await safe_answer(call)

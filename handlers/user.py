@@ -33,8 +33,8 @@ async def cmd_start(message: Message):
     show_chat = message.chat.type == "private"
     show_admin = is_admin(uid)
     await message.answer(
-        "👋 Добро пожаловать!\n🔍 OSINT-пробив — Instagram поиск",
-        reply_markup=main_kb(show_chat=show_chat, show_osint=True, show_admin=show_admin)
+        "👋 Добро пожаловать!",
+        reply_markup=main_kb(show_chat=show_chat, show_admin=show_admin)
     )
 
 

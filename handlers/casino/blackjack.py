@@ -9,9 +9,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from .base import (
-    get_bot, get_db, get_user, create_user, update_blackjack_balance, get_username,
+    get_bot, get_db, get_user, create_user, update_balance, get_username,
     BlackjackRoom, active_blackjack_games, active_games_lock,
-    INITIAL_BLACKJACK_BALANCE, logger,
+    INITIAL_BALANCE, logger,
     save_active_game, delete_active_game,
 )
 from .keyboards import blackjack_join_keyboard, blackjack_action_keyboard
@@ -101,12 +101,12 @@ async def cmd_blackjack(message: Message):
         await create_user(message.from_user)
         user = await get_user(message.from_user.id)
 
-    bj_bal = user["blackjack_balance"] if user["blackjack_balance"] is not None else INITIAL_BLACKJACK_BALANCE
+    bj_bal = user["balance"] if user["balance"] is not None else INITIAL_BALANCE
     if bj_bal < bet:
         await message.reply(f"❌ Недостаточно средств для блэкджека! Баланс: {bj_bal} монет")
         return
 
-    await update_blackjack_balance(message.from_user.id, -bet, "bj_reserve")
+    await update_balance(message.from_user.id, -bet, "bj_reserve")
 
     room_id = f"bj-{uuid.uuid4()}"
     game = BlackjackRoom(room_id, bet, message.from_user.id, message.chat.id)
@@ -138,7 +138,7 @@ async def blackjack_join_timeout(room_id: str, delay: int):
         if not game or game.is_finished or game.phase != "joining":
             return
         if len(game.players) < 1:
-            await update_blackjack_balance(game.creator_id, game.bet, "bj_refund")
+            await update_balance(game.creator_id, game.bet, "bj_refund")
             game.is_finished = True
             del active_blackjack_games[room_id]
             await delete_active_game(room_id)
@@ -170,12 +170,12 @@ async def cb_bj_join(call: CallbackQuery):
             await create_user(call.from_user)
             user = await get_user(call.from_user.id)
 
-        bj_bal = user["blackjack_balance"] if user["blackjack_balance"] is not None else INITIAL_BLACKJACK_BALANCE
+        bj_bal = user["balance"] if user["balance"] is not None else INITIAL_BALANCE
         if bj_bal < game.bet:
             await call.answer("❌ Недостаточно средств для блэкджека!", show_alert=True)
             return
 
-        await update_blackjack_balance(call.from_user.id, -game.bet, "bj_reserve")
+        await update_balance(call.from_user.id, -game.bet, "bj_reserve")
         game.players[call.from_user.id] = []
         game.player_names[call.from_user.id] = await get_username(call.from_user.id)
 
@@ -479,10 +479,10 @@ async def play_bj_dealer(game: BlackjackRoom):
             result += f"❌ {name}: <b>{player_val}</b> — перебор\n"
         elif dealer_val > 21 or player_val > dealer_val:
             result += f"🏆 {name}: <b>{player_val}</b> — победа! +{game.bet * 2} 🪙\n"
-            await update_blackjack_balance(pid, game.bet * 2, "bj_win")
+            await update_balance(pid, game.bet * 2, "bj_win")
         elif player_val == dealer_val:
             result += f"🎭 {name}: <b>{player_val}</b> — ничья\n"
-            await update_blackjack_balance(pid, game.bet, "bj_tie")
+            await update_balance(pid, game.bet, "bj_tie")
         else:
             result += f"❌ {name}: <b>{player_val}</b> — проигрыш\n"
 
@@ -495,7 +495,7 @@ async def play_bj_dealer(game: BlackjackRoom):
     async with active_games_lock:
         if game.room_id in active_blackjack_games:
             del active_blackjack_games[game.room_id]
-    await delete_active_game(room_id)
+    await delete_active_game(game.room_id)
 
 
 @router.callback_query(F.data.startswith("casino_bj_bet_"))
@@ -530,12 +530,12 @@ async def cb_casino_bj_bet(call: CallbackQuery, state: FSMContext):
         await create_user(call.from_user)
         user = await get_user(call.from_user.id)
 
-    bj_bal = user["blackjack_balance"] if user["blackjack_balance"] is not None else INITIAL_BLACKJACK_BALANCE
+    bj_bal = user["balance"] if user["balance"] is not None else INITIAL_BALANCE
     if bj_bal < bet:
         await call.answer(f"❌ Недостаточно средств! Баланс: {bj_bal}", show_alert=True)
         return
 
-    await update_blackjack_balance(call.from_user.id, -bet, "bj_reserve")
+    await update_balance(call.from_user.id, -bet, "bj_reserve")
 
     room_id = f"bj-{uuid.uuid4()}"
     game = BlackjackRoom(room_id, bet, call.from_user.id, call.message.chat.id)

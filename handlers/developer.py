@@ -322,7 +322,7 @@ async def cmd_dev_db(message: Message):
     if not is_dev(message.from_user.id):
         return
     stats = []
-    tables = ["users", "messages", "bans", "reports", "appeals", "osint_logs", "moderation", "dev_permissions"]
+    tables = ["users", "messages", "bans", "reports", "appeals", "moderation", "dev_permissions"]
     for t in tables:
         db.cur.execute(f"SELECT COUNT(*) FROM {t}")
         cnt = db.cur.fetchone()[0]
@@ -371,7 +371,7 @@ async def cmd_dev_export(message: Message, command: CommandObject):
     table = "users"
     if command.args:
         t = command.args.strip()
-        if t in ("users", "messages", "bans", "reports", "appeals", "osint_logs", "moderation"):
+        if t in ("users", "messages", "bans", "reports", "appeals", "moderation"):
             table = t
     db.cur.execute(f"SELECT * FROM {table} ORDER BY rowid DESC LIMIT 50")
     rows = db.cur.fetchall()

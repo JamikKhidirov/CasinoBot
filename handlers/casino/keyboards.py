@@ -135,6 +135,7 @@ def pvp_game_selection_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for gt, cfg in GAMES_CONFIG.items():
         builder.button(text=f"{cfg['emoji']} {gt.capitalize()}", callback_data=f"casino_pick_game_{gt}")
+    builder.button(text="✂️ КНБ", callback_data="casino_rps_info")
     builder.adjust(2)
     builder.row(
         InlineKeyboardButton(text="🃏 Блэкджек", callback_data="casino_blackjack_info"),
@@ -194,7 +195,6 @@ def casino_admin_kb(perms: Optional[list[str]] = None) -> InlineKeyboardMarkup:
     row.append(InlineKeyboardButton(text="📋 Чек", callback_data="adm_check"))
     buttons.append(row)
     buttons.append([InlineKeyboardButton(text="🤖 Пополнить счёт (бот)", callback_data="casino_admin_addbot")])
-    buttons.append([InlineKeyboardButton(text="🃏 Пополнить счёт (блэкджек)", callback_data="casino_admin_addbj")])
     buttons.append([InlineKeyboardButton(text="💰 Пополнить PVP-счёт", callback_data="casino_admin_add")])
     buttons.append([InlineKeyboardButton(text="⭐ Топ с ботом", callback_data="casino_admin_solotop")])
     buttons.append([InlineKeyboardButton(text="📖 Команды /admin", callback_data="casino_admin_help")])

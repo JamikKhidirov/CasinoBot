@@ -9,9 +9,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from .base import (
-    get_bot, get_db, get_user, create_user, update_balance, update_blackjack_balance, get_username,
+    get_bot, get_db, get_user, create_user, update_balance, get_username,
     GAMES_CONFIG, GameRoom, BlackjackRoom, active_games, active_blackjack_games, active_games_lock,
-    GameStates, COMMISSION_RATE, INITIAL_BLACKJACK_BALANCE, logger,
+    GameStates, COMMISSION_RATE, INITIAL_BALANCE, logger,
     save_active_game, delete_active_game,
 )
 from .keyboards import blackjack_join_keyboard
@@ -741,11 +741,11 @@ async def process_custom_bet(message: Message, state: FSMContext):
         if not user:
             await create_user(message.from_user)
             user = await get_user(message.from_user.id)
-        bj_bal = user["blackjack_balance"] if user["blackjack_balance"] is not None else INITIAL_BLACKJACK_BALANCE
+        bj_bal = user["balance"] if user["balance"] is not None else INITIAL_BALANCE
         if bj_bal < bet:
             await message.answer(f"❌ Недостаточно средств! Баланс: {bj_bal}")
             return
-        await update_blackjack_balance(message.from_user.id, -bet, "bj_reserve")
+        await update_balance(message.from_user.id, -bet, "bj_reserve")
         room_id = f"bj-{uuid.uuid4()}"
         game = BlackjackRoom(room_id, bet, message.from_user.id, message.chat.id)
         game.players[message.from_user.id] = []
@@ -764,6 +764,49 @@ async def process_custom_bet(message: Message, state: FSMContext):
         game.join_message_id = sent.message_id
         game.phase = "joining"
         asyncio.ensure_future(blackjack_join_timeout(room_id, 60))
+        return
+
+    if game_type == "rps":
+        if message.chat.type == "private":
+            await message.answer("❌ Камень-Ножницы-Бумага только в группах!")
+            return
+        user = await get_user(message.from_user.id)
+        if not user:
+            await create_user(message.from_user)
+            user = await get_user(message.from_user.id)
+        if user["balance"] < bet:
+            await message.answer(f"❌ Недостаточно средств! Баланс: {user['balance']}")
+            return
+        await update_balance(message.from_user.id, -bet, "rps_reserve")
+        room_id = str(uuid.uuid4())
+        game = GameRoom(room_id, "rps", bet, message.from_user.id)
+        game.chat_id = message.chat.id
+        async with active_games_lock:
+            for g in active_games.values():
+                if not g.is_finished and message.from_user.id in (g.player1, g.player2):
+                    await update_balance(message.from_user.id, bet, "refund")
+                    await message.answer("❌ Вы уже участвуете в другой игре!")
+                    return
+            active_games[room_id] = game
+        await save_active_game(room_id, "rps", message.from_user.id, 0, bet)
+        p1_name = await get_username(message.from_user.id)
+        from .keyboards import InlineKeyboardMarkup, InlineKeyboardButton
+        sent = await message.answer(
+            f"✂️ <b>Камень-Ножницы-Бумага!</b>\n"
+            f"💵 Ставка: {bet} 🪙\n"
+            f"⏳ Ожидание второго игрока...\n\n"
+            f"Игрок 1: {p1_name}\n"
+            f"Места: 1/2\n\n"
+            f"Игра отменится через 60 секунд, если никто не присоединится.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✂️ Присоединиться", callback_data=f"rps_join_{room_id}")],
+                [InlineKeyboardButton(text="❌ Отменить", callback_data=f"rps_cancel_{room_id}")],
+            ]),
+        )
+        game.message_id = sent.message_id
+        import asyncio
+        from .games_rps import _rps_join_timeout
+        asyncio.ensure_future(_rps_join_timeout(room_id, 60))
         return
 
     await create_game_for_user(message, message.from_user, message.from_user.id, game_type, bet)

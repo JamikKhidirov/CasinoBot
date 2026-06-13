@@ -1,7 +1,6 @@
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
-from handlers.osint_handlers import osint_waiting, osint_text_handler, _tg_login_state
 from handlers.user import active_users, handle_chat_text
 from utils.helpers import is_banned, is_muted, update_user_activity
 
@@ -39,14 +38,6 @@ async def text_dispatcher(message: Message, state: FSMContext):
             await state.clear()
         await handle_chat_text(message)
         return
-
-    if uid in osint_waiting:
-        await state.clear()
-        await osint_text_handler(message)
-        return
-
-    if uid in _tg_login_state:
-        return  # передаём обработку в osint_handlers
 
     current_state = await state.get_state()
     if current_state is not None:

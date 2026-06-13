@@ -37,6 +37,7 @@ async def cb_casino_games(call: CallbackQuery):
     text = "<b>🎮 Выберите режим игры:</b>\n\n"
     text += "🤖 <b>Игра с ботом</b> — в ЛС, бот кидает кубик, своя валюта\n"
     text += "👥 <b>С игроками</b> — в группе, PVP, создание комнаты\n"
+    text += "✂️ <b>Камень-Ножницы-Бумага</b> — PVP в группе\n"
     text += "🃏 <b>Блэкджек</b> — в группе, до 6 игроков, против дилера\n\n"
     text += "💡 Нажмите /<b>профиль</b> чтобы посмотреть баланс"
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=game_selection_kb())
@@ -300,6 +301,7 @@ async def cmd_games(message: Message):
     text = "<b>🕹 Доступные игры:</b>\n\n"
     for game_type, cfg in GAMES_CONFIG.items():
         text += f"┃ {cfg['emoji']} <b>{game_type.capitalize()}</b>  →  <code>/{cfg['command']} [ставка]</code> (PVP)\n"
+    text += "┃ ✂️ <b>Камень-Ножницы-Бумага</b>  →  через меню (PVP, в группе)\n"
     text += "┃ 🃏 <b>Блэкджек</b>  →  <code>/блекджек [ставка]</code> (в группе, до 6 игроков)\n"
     text += "┃ 🤖 <b>С ботом</b>  →  <code>/сботом [игра] [ставка]</code> (в ЛС)\n"
     text += "\n💡 Нажмите /<b>профиль</b> чтобы посмотреть баланс"

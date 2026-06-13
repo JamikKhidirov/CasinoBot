@@ -8,10 +8,10 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from utils.helpers import resolve_user
 from .base import (
-    get_bot, get_db, get_user, create_user, update_balance, update_bot_balance, update_blackjack_balance, get_username,
+    get_bot, get_db, get_user, create_user, update_balance, update_bot_balance, get_username,
     is_casino_admin, has_perm, is_owner, get_users_with_perm,
     DepositState, PaymentProvideState, WithdrawState, AdminAction,
-    ADMIN_ID, INITIAL_BLACKJACK_BALANCE, INITIAL_BOT_BALANCE, logger,
+    ADMIN_ID, INITIAL_BOT_BALANCE, logger,
 )
 
 router = Router()
@@ -29,14 +29,12 @@ async def cmd_profile(message: Message):
         await message.reply("ℹ️ Для просмотра профиля и пополнения баланса перейдите в личные сообщения с ботом.")
         return
 
-    bj_bal = user["blackjack_balance"] if user["blackjack_balance"] is not None else INITIAL_BLACKJACK_BALANCE
     bbot = user["bot_balance"] if user["bot_balance"] is not None else INITIAL_BOT_BALANCE
     text = (
         f"<b>📊 Профиль игрока</b> {message.from_user.first_name}\n\n"
         f"┃ 🆔 ID: <code>{user['user_id']}</code>\n"
-        f"┃ 💰 <b>PVP баланс:</b> {user['balance']} 🪙\n"
+        f"┃ 💰 <b>Баланс (PVP/Блэкджек):</b> {user['balance']} 🪙\n"
         f"┃ 🤖 <b>Игра с ботом:</b> {bbot} 🤖\n"
-        f"┃ 🃏 <b>Блэкджек:</b> {bj_bal} 🪙\n"
         f"┃ 🎮 <b>Сыграно игр:</b> {user['games_played']}\n"
         f"┃ 🏆 <b>Побед:</b> {user['wins']}\n"
     )
@@ -392,8 +390,6 @@ async def cmd_approve_deposit(message: Message):
             await message.reply("❌ Запрос не найден или ещё не оплачен пользователем.")
             return
 
-        user_id = row["user_id"]
-        amount = row["amount"]
         user_id = row["user_id"]
         amount = row["amount"]
         await update_balance(user_id, amount, "deposit")
