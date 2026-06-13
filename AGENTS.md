@@ -24,7 +24,15 @@ python main.py
 | `handlers/text_handler.py` | Диспетчер текстовых сообщений (OSINT vs чат) |
 | `handlers/user.py` | Хендлер `/start`, состояние `active_users`/`waiting_users` для чата |
 | `handlers/casino/` | Casino-хендлеры: профиль, игры, ставки, бонусы |
-| `handlers/callbacks.py` | Callback'и чата + казино + общие (back/help) |
+| `handlers/casino/games_rps.py` | Камень-ножницы-бумага (PVP, выбор в ЛС, таймер 30с) |
+| `handlers/casino/games_pvp.py` | PVP-игры (кости, боулинг, дротики, баскетбол, футбол) |
+| `handlers/casino/games_solo.py` | Игры с ботом (в ЛС) |
+| `handlers/casino/blackjack.py` | Блэкджек (до 6 игроков, в группах) |
+| `handlers/casino/menu.py` | Меню казино, список игр, топ, активные игры |
+| `handlers/casino/profile.py` | Профиль, пополнение, вывод, промокоды |
+| `handlers/casino/admin.py` | Админ-панель казино |
+| `handlers/casino/base.py` | База казино: GameRoom, BlackjackRoom, БД, общие утилиты |
+| `handlers/callbacks.py` | Callback'и чата + казино + общие (back/help) + `/help` |
 | `handlers/admin.py` | Админ-команды: `/stats` |
 | `handlers/moderation.py` | Модерация: бан, мут, варны, админ-панель |
 | `handlers/developer.py` | Dev-команды: выдача прав, рассылка |
