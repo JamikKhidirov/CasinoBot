@@ -27,11 +27,14 @@ def _rps_winner(c1: str, c2: str) -> int:
     return 2
 
 
+_RPS_CHOICES_MAP = {"rock": "🪨", "scissors": "✂️", "paper": "📄"}
+_RPS_CHOICES_REV = {"🪨": "rock", "✂️": "scissors", "📄": "paper"}
+
 def _rps_pick_kb(room_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🪨 Камень", callback_data=f"rps_pick_{room_id}_🪨"),
-         InlineKeyboardButton(text="✂️ Ножницы", callback_data=f"rps_pick_{room_id}_✂️"),
-         InlineKeyboardButton(text="📄 Бумага", callback_data=f"rps_pick_{room_id}_📄")]
+        [InlineKeyboardButton(text="🪨 Камень", callback_data=f"rps_pick_{room_id}_rock"),
+         InlineKeyboardButton(text="✂️ Ножницы", callback_data=f"rps_pick_{room_id}_scissors"),
+         InlineKeyboardButton(text="📄 Бумага", callback_data=f"rps_pick_{room_id}_paper")]
     ])
 
 
@@ -130,7 +133,8 @@ async def _check_both_choices(game: GameRoom):
     if game.player1 not in choices or game.player2 not in choices:
         return
 
-    c1, c2 = choices[game.player1], choices[game.player2]
+    c1 = _RPS_CHOICES_MAP.get(choices[game.player1], choices[game.player1])
+    c2 = _RPS_CHOICES_MAP.get(choices[game.player2], choices[game.player2])
     result = _rps_winner(c1, c2)
     p1_name = await get_username(game.player1)
     p2_name = await get_username(game.player2)
@@ -196,7 +200,11 @@ async def cb_rps_pick(call: CallbackQuery):
         await call.answer("❌ Ошибка.", show_alert=True)
         return
     room_id = parts[2]
-    choice = parts[3]
+    choice_key = parts[3]
+    choice = _RPS_CHOICES_MAP.get(choice_key)
+    if not choice:
+        await call.answer("❌ Ошибка выбора.", show_alert=True)
+        return
 
     async with active_games_lock:
         game = active_games.get(room_id)
@@ -209,10 +217,11 @@ async def cb_rps_pick(call: CallbackQuery):
 
     choices = _rps_choices.setdefault(room_id, {})
     if uid in choices:
-        await call.answer(f"✅ Вы уже выбрали {choices[uid]}", show_alert=True)
+        chosen_emoji = _RPS_CHOICES_MAP.get(choices[uid], choices[uid])
+        await call.answer(f"✅ Вы уже выбрали {chosen_emoji}", show_alert=True)
         return
 
-    choices[uid] = choice
+    choices[uid] = choice_key
     await call.answer(f"✅ Вы выбрали {choice}", show_alert=False)
     try:
         await call.message.edit_text(

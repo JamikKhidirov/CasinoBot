@@ -6,7 +6,7 @@ from datetime import datetime
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from .base import (
     get_bot, get_db, get_user, create_user, update_balance, get_username,
@@ -272,7 +272,14 @@ async def start_blackjack_round(game: BlackjackRoom):
     except Exception:
         pass
 
-    sent = await get_bot().send_message(game.chat_id, text)
+    bot_user = await get_bot().me()
+    pm_url = f"https://t.me/{bot_user.username}"
+    sent = await get_bot().send_message(
+        game.chat_id, text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Перейти в ЛС", url=pm_url)]
+        ]),
+    )
     game.message_id = sent.message_id
 
     await ask_bj_player_decision(game, game.creator_id)

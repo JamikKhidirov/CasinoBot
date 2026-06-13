@@ -8,7 +8,7 @@ def main_kb(show_chat: bool = True, show_admin: bool = False):
         InlineKeyboardButton(text="🎰 Казино", callback_data="casino_menu"),
     )
     if show_chat:
-        builder.row(InlineKeyboardButton(text="🎲 Анонимный чат", callback_data="start_chat"))
+        builder.row(InlineKeyboardButton(text="🎲 Анонимный чат", callback_data="chat_info"))
     builder.row(
         InlineKeyboardButton(text="👤 Профиль", callback_data="myprofile"),
         InlineKeyboardButton(text="🏆 Топ", callback_data="casino_top"),

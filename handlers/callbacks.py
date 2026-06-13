@@ -16,6 +16,26 @@ async def safe_answer(call: CallbackQuery, *args, **kwargs):
         pass
 
 
+@router.callback_query(F.data == "chat_info")
+async def cb_chat_info(call: CallbackQuery):
+    if call.message.chat.type != "private":
+        await safe_answer(call, "❌ Только в ЛС.", show_alert=True)
+        return
+    text = (
+        "🎲 <b>Анонимный чат</b>\n\n"
+        "▫️ Вы общаетесь анонимно\n"
+        "▫️ Собеседник не видит ваше имя\n"
+        "▫️ Можно пожаловаться на собеседника\n"
+        "▫️ Администрация видит логи чатов\n\n"
+        "Нажмите «Найти собеседника» чтобы начать!"
+    )
+    await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔍 Найти собеседника", callback_data="start_chat")],
+        [InlineKeyboardButton(text="◀️ На главную", callback_data="back_main")],
+    ]))
+    await safe_answer(call)
+
+
 @router.callback_query(F.data == "start_chat")
 async def cb_start_chat(call: CallbackQuery, state: FSMContext):
     if call.message.chat.type != "private":
