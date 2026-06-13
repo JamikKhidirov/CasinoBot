@@ -456,19 +456,23 @@ async def cb_bj_hit(call: CallbackQuery):
         name = game.player_names[player_id]
         cards = game.players[player_id]
 
-        await cancel_bj_timer(game)
-        await call.message.edit_text(f"🎴 {name} берёт: {cards_str(cards)} = <b>{val}</b>")
-
         if val > 21:
             game.player_status[player_id] = "bust"
-            await get_bot().send_message(game.chat_id, f"💥 {name} перебрал {hand_emoji(val)} (<b>{val}</b>)")
-            await next_bj_player(game, player_id)
         elif val == 21:
             game.player_status[player_id] = "stand"
-            await get_bot().send_message(game.chat_id, f"🃏 {name} набрал 21! Blackjack!")
-            await next_bj_player(game, player_id)
-        else:
-            await ask_bj_player_decision(game, player_id)
+
+        await cancel_bj_timer(game)
+
+    await call.message.edit_text(f"🎴 {name} берёт: {cards_str(cards)} = <b>{val}</b>")
+
+    if val > 21:
+        await get_bot().send_message(game.chat_id, f"💥 {name} перебрал {hand_emoji(val)} (<b>{val}</b>)")
+        await next_bj_player(game, player_id)
+    elif val == 21:
+        await get_bot().send_message(game.chat_id, f"🃏 {name} набрал 21! Blackjack!")
+        await next_bj_player(game, player_id)
+    else:
+        await ask_bj_player_decision(game, player_id)
 
     await call.answer()
 
@@ -499,9 +503,9 @@ async def cb_bj_stand(call: CallbackQuery):
         val = hand_value(cards)
 
         await cancel_bj_timer(game)
-        await call.message.edit_text(f"✋ {name} остановился. Очки: <b>{val}</b>")
-        await next_bj_player(game, player_id)
 
+    await call.message.edit_text(f"✋ {name} остановился. Очки: <b>{val}</b>")
+    await next_bj_player(game, player_id)
     await call.answer()
 
 

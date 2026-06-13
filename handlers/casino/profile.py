@@ -101,12 +101,14 @@ async def _submit_deposit_request(user_id: int, amount: int, msg: Message):
     deposit_id = None
     try:
         cursor = await conn.execute(
-            "SELECT id FROM deposit_requests WHERE user_id = ? AND status = 'pending'",
+            "SELECT id, status FROM deposit_requests WHERE user_id = ? AND status IN ('pending', 'payment_sent', 'paid')",
             (user_id,),
         )
         existing = await cursor.fetchone()
         if existing:
-            await msg.answer("❌ У вас уже есть активный запрос на пополнение!")
+            status_map = {"pending": "ожидает", "payment_sent": "ожидает оплаты", "paid": "ожидает подтверждения"}
+            status_text = status_map.get(existing["status"], existing["status"])
+            await msg.answer(f"❌ У вас уже есть активный запрос на пополнение (статус: {status_text}). Сначала дождитесь его обработки.")
             return
         cursor = await conn.execute(
             "INSERT INTO deposit_requests (user_id, amount, created) VALUES (?, ?, ?)",

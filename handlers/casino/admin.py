@@ -388,7 +388,7 @@ async def cb_casino_admin_stats(call: CallbackQuery):
         cursor = await conn.execute("SELECT COUNT(*) as cnt FROM users WHERE games_played > 0")
         active_players = (await cursor.fetchone())["cnt"]
         cursor = await conn.execute(
-            "SELECT COUNT(*) as cnt FROM deposit_requests WHERE status = 'pending'"
+            "SELECT COUNT(*) as cnt FROM deposit_requests WHERE status IN ('pending', 'payment_sent', 'paid')"
         )
         pending = (await cursor.fetchone())["cnt"]
         cursor = await conn.execute("SELECT SUM(balance) as total FROM users")
@@ -417,39 +417,48 @@ async def cb_casino_admin_pending(call: CallbackQuery):
     conn = await get_db()
     try:
         cursor = await conn.execute(
-            "SELECT * FROM deposit_requests WHERE status = 'pending' ORDER BY created"
+            "SELECT * FROM deposit_requests WHERE status IN ('pending', 'payment_sent', 'paid') ORDER BY created"
         )
         pending = await cursor.fetchall()
     finally:
         await conn.close()
 
     if not pending:
-        await call.message.edit_text("📋 Нет ожидающих запросов на пополнение.")
+        await call.message.edit_text("📋 Нет активных запросов на пополнение.")
         await call.answer()
         return
 
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-    text = "<b>📋 Ожидающие запросы:</b>\n\n"
+    status_labels = {"pending": "⏳", "payment_sent": "💳", "paid": "✅"}
+    text = "<b>📋 Активные запросы:</b>\n\n"
     buttons = []
-    for req in pending[:10]:
+    for req in pending[:15]:
         username = await get_username(req["user_id"])
+        icon = status_labels.get(req["status"], "❓")
         text += (
-            f"┃ <b>#{req['id']}</b>\n"
+            f"{icon} <b>#{req['id']}</b>\n"
             f"┃ 👤 {username}\n"
             f"┃ 🆔 <code>{req['user_id']}</code>\n"
             f"┃ 💵 {req['amount']} монет\n"
+            f"┃ 📌 {req['status']}\n"
             f"┃ 📅 {req['created']}\n\n"
         )
-        buttons.append([
-            InlineKeyboardButton(text=f"💳 #{req['id']}", callback_data=f"provide_{req['id']}"),
-            InlineKeyboardButton(text="❌", callback_data=f"admin_reject_{req['id']}"),
-        ])
+        if req["status"] == "pending":
+            buttons.append([
+                InlineKeyboardButton(text=f"💳 #{req['id']}", callback_data=f"provide_{req['id']}"),
+                InlineKeyboardButton(text="❌", callback_data=f"admin_reject_{req['id']}"),
+            ])
+        elif req["status"] == "paid":
+            buttons.append([
+                InlineKeyboardButton(text=f"✅ #{req['id']}", callback_data=f"approve_{req['id']}"),
+                InlineKeyboardButton(text="❌", callback_data=f"admin_reject_{req['id']}"),
+            ])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="casino_admin")])
 
-    if len(pending) > 10:
-        text += f"┃ <i>...и ещё {len(pending) - 10} запросов</i>\n\n"
+    if len(pending) > 15:
+        text += f"┃ <i>...и ещё {len(pending) - 15} запросов</i>\n\n"
 
-    text += "💡 Нажмите кнопку с номером запроса, чтобы обработать."
+    text += "💡 Нажмите кнопку для обработки."
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await call.answer()
 
