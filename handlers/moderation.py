@@ -65,6 +65,7 @@ async def cb_mod(call: CallbackQuery):
         await call.message.edit_text(help_texts[action][0], parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=back_btn))
     else:
         await call.answer("❌ Неизвестное действие.", show_alert=True)
+        return
 
     await call.answer()
 

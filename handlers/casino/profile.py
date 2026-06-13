@@ -219,11 +219,14 @@ async def process_payment_details(message: Message, state: FSMContext):
 
     conn = await get_db()
     try:
-        await conn.execute(
+        cursor = await conn.execute(
             "UPDATE deposit_requests SET payment_details = ?, status = 'payment_sent' WHERE id = ? AND status = 'pending'",
             (details, deposit_id),
         )
         await conn.commit()
+        if cursor.rowcount == 0:
+            await message.answer("❌ Запрос уже обработан. Изменения не сохранены.", parse_mode="HTML")
+            return
     finally:
         await conn.close()
 
@@ -743,14 +746,13 @@ async def cmd_activate_promo(message: Message):
     finally:
         await conn.close()
 
-    await update_balance(user_id, amount, "promo")
-
     conn = await get_db()
     try:
         await conn.execute(
             "INSERT INTO promo_activations (code, user_id, activated_at) VALUES (?, ?, ?)",
             (code, user_id, datetime.now().isoformat()),
         )
+        await update_balance(user_id, amount, "promo")
         await conn.commit()
     finally:
         await conn.close()

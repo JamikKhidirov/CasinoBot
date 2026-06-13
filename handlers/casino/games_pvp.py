@@ -614,10 +614,12 @@ async def handle_game_emoji(message: Message):
                 break
 
         if not game:
-            # If user has a solo game, let the solo handler process the emoji
+            # If user has a solo game, process it here directly
             try:
-                from .games_solo import _solo_games
-                if uid in _solo_games:
+                from .games_solo import _solo_games, _process_solo_roll
+                solo = _solo_games.get(uid)
+                if solo:
+                    await _process_solo_roll(message, uid, solo)
                     return
             except ImportError:
                 pass

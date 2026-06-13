@@ -204,6 +204,35 @@ async def cb_casino_unlock(call: CallbackQuery):
         for rid in to_remove:
             del active_games[rid]
 
+    # Blackjack cleanup
+    async with active_games_lock:
+        bj_to_remove = []
+        for rid, g in list(active_blackjack_games.items()):
+            if user_id in g.players:
+                try:
+                    await update_balance(user_id, g.bet, "refund")
+                    refunded += g.bet
+                except Exception:
+                    pass
+                bj_to_remove.append((rid, g))
+        for rid, g in bj_to_remove:
+            try:
+                await g.cancel_timer()
+            except Exception:
+                pass
+            del active_blackjack_games[rid]
+
+    # Solo cleanup
+    from .games_solo import _solo_games
+    solo = _solo_games.pop(user_id, None)
+    if solo:
+        try:
+            await update_balance(user_id, solo["bet"], "refund")
+            refunded += solo["bet"]
+        except Exception:
+            pass
+        await delete_active_game(f"solo_{user_id}")
+
     await call.message.answer(
         f"✅ <b>Все ваши игры отменены!</b>\n🔙 Возвращено: <b>{refunded}</b> 🪙\n"
         "Теперь вы можете создавать новые игры!",
@@ -359,6 +388,35 @@ async def cmd_force_unlock(message: Message):
 
         for rid in to_remove:
             del active_games[rid]
+
+    # Blackjack cleanup
+    async with active_games_lock:
+        bj_to_remove = []
+        for rid, g in list(active_blackjack_games.items()):
+            if user_id in g.players:
+                try:
+                    await update_balance(user_id, g.bet, "refund")
+                    refunded += g.bet
+                except:
+                    pass
+                bj_to_remove.append((rid, g))
+        for rid, g in bj_to_remove:
+            try:
+                await g.cancel_timer()
+            except:
+                pass
+            del active_blackjack_games[rid]
+
+    # Solo cleanup
+    from .games_solo import _solo_games
+    solo = _solo_games.pop(user_id, None)
+    if solo:
+        try:
+            await update_balance(user_id, solo["bet"], "refund")
+            refunded += solo["bet"]
+        except:
+            pass
+        await delete_active_game(f"solo_{user_id}")
 
     await message.reply(
         f"✅ Все ваши игры отменены! Возвращено: {refunded} монет\n"

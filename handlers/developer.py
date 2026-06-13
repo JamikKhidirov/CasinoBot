@@ -333,7 +333,7 @@ async def cmd_dev_db(message: Message):
         size = os.path.getsize("chat.db") // 1024
     except:
         pass
-    await message.answer(f"<b>🗄 Статистика БД</b>\n" + "\n".join(stats) + f"\n┃ Размер: {size} KB" if size else "\n".join(stats), parse_mode="HTML")
+    await message.answer(f"<b>🗄 Статистика БД</b>\n" + "\n".join(stats) + (f"\n┃ Размер: {size} KB" if size else ""), parse_mode="HTML")
 
 
 # ========== СБРОС ПОЛЬЗОВАТЕЛЯ ==========

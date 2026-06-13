@@ -5,10 +5,12 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
+from decimal import Decimal
+
 from .base import (
     get_bot, get_db, get_user, create_user, update_balance, get_username,
     GameRoom, active_games, active_games_lock,
-    GameStates, logger,
+    GameStates, COMMISSION_RATE, logger,
     save_active_game, delete_active_game,
 )
 
@@ -147,21 +149,27 @@ async def _check_both_choices(game: GameRoom):
         await update_balance(game.player1, game.bet, "rps_tie")
         await update_balance(game.player2, game.bet, "rps_tie")
     elif result == 1:
+        total_bet = game.bet * 2
+        commission = int(total_bet * COMMISSION_RATE)
+        prize = total_bet - commission
         text = (
             f"🏆 <b>Победил {p1_name}!</b>\n\n"
             f"🪨 {p1_name}: {c1}\n"
             f"📄 {p2_name}: {c2}\n\n"
-            f"💰 {p1_name} получает +{game.bet * 2} 🪙"
+            f"💰 {p1_name} получает +{prize} 🪙 (комиссия: {commission})"
         )
-        await update_balance(game.player1, game.bet * 2, "rps_win")
+        await update_balance(game.player1, prize, "rps_win")
     else:
+        total_bet = game.bet * 2
+        commission = int(total_bet * COMMISSION_RATE)
+        prize = total_bet - commission
         text = (
             f"🏆 <b>Победил {p2_name}!</b>\n\n"
             f"🪨 {p1_name}: {c1}\n"
             f"📄 {p2_name}: {c2}\n\n"
-            f"💰 {p2_name} получает +{game.bet * 2} 🪙"
+            f"💰 {p2_name} получает +{prize} 🪙 (комиссия: {commission})"
         )
-        await update_balance(game.player2, game.bet * 2, "rps_win")
+        await update_balance(game.player2, prize, "rps_win")
 
     game.is_finished = True
     async with active_games_lock:

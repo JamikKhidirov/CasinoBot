@@ -150,12 +150,14 @@ async def cb_report_chat(call: CallbackQuery):
         (uid, partner, "Жалоба из анонимного чата", now),
     )
     db.conn.commit()
-    # Warn the reported user
-    await call.bot.send_message(
-        partner,
-        "⚠️ Ваш собеседник пожаловался на вас.\n"
-        "Пожалуйста, соблюдайте правила общения."
-    )
+    try:
+        await call.bot.send_message(
+            partner,
+            "⚠️ Ваш собеседник пожаловался на вас.\n"
+            "Пожалуйста, соблюдайте правила общения."
+        )
+    except Exception:
+        pass
     # Notify the developer
     try:
         reporter_name = call.from_user.username or call.from_user.first_name or str(uid)

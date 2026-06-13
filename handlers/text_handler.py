@@ -30,7 +30,7 @@ async def text_dispatcher(message: Message, state: FSMContext):
             await message.answer("🚫 Вы забанены и не можете отправлять сообщения.")
             return
         if is_muted(uid):
-            await message.answer("🔇 Вы замучены. Подождите окончания наказания.")
+            await message.answer("🔇 Вы замьючены. Подождите окончания наказания.")
             return
         # Clear stale FSM state so admin handlers don't eat the message
         current_state = await state.get_state()

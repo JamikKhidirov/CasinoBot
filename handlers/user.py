@@ -51,4 +51,9 @@ async def handle_chat_text(message: Message):
     partner = active_users[uid]
     text = message.text
     save_message(uid, partner, text)
-    await message.bot.send_message(partner, f"👤: {text}")
+    try:
+        await message.bot.send_message(partner, f"👤: {text}")
+    except Exception:
+        active_users.pop(uid, None)
+        active_users.pop(partner, None)
+        await message.answer("❌ Собеседник недоступен. Поиск нового...")
