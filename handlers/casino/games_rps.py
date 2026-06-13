@@ -1,5 +1,6 @@
 import asyncio
 import uuid
+from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -104,10 +105,36 @@ async def _start_rps(game: GameRoom):
 
 
 async def _rps_timeout(game: GameRoom):
-    await asyncio.sleep(30)
+    timer_msg_id = None
+    try:
+        for remaining in range(30, 0, -1):
+            if game.is_finished:
+                return
+            choices = _rps_choices.get(game.room_id, {})
+            if len(choices) >= 2:
+                return
+            if remaining % 5 == 0 or remaining <= 5:
+                text = f"⏱ Осталось <b>{remaining}</b> сек"
+                if timer_msg_id:
+                    try:
+                        await get_bot().edit_message_text(text, chat_id=game.chat_id, message_id=timer_msg_id)
+                    except Exception:
+                        sent = await get_bot().send_message(game.chat_id, text)
+                        timer_msg_id = sent.message_id
+                else:
+                    sent = await get_bot().send_message(game.chat_id, text)
+                    timer_msg_id = sent.message_id
+            await asyncio.sleep(1)
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        pass
+
     if game.is_finished:
         return
     choices = _rps_choices.get(game.room_id, {})
+    if len(choices) >= 2:
+        return
     remained = [pid for pid in (game.player1, game.player2) if pid not in choices]
     if not remained:
         return
@@ -117,6 +144,11 @@ async def _rps_timeout(game: GameRoom):
         game.is_finished = True
         del active_games[game.room_id]
     await delete_active_game(game.room_id)
+    try:
+        if timer_msg_id:
+            await get_bot().delete_message(game.chat_id, timer_msg_id)
+    except Exception:
+        pass
 
     for pid in (game.player1, game.player2):
         await update_balance(pid, game.bet, "refund_rps")
@@ -379,32 +411,52 @@ async def cb_rps_join(call: CallbackQuery):
     async with active_games_lock:
         game = active_games.get(room_id)
         if not game:
-            logger.warning(f"cb_rps_join: game {room_id} not found (joiner={uid})")
+            logger.warning(f"cb_rps_join: game {room_id} not in memory (joiner={uid})")
             try:
                 db = await get_db()
-                cur = await db.execute("SELECT state FROM active_game_sessions WHERE room_id = ?", (room_id,))
+                cur = await db.execute("SELECT * FROM active_game_sessions WHERE room_id = ?", (room_id,))
                 row = await cur.fetchone()
                 await db.close()
-                if row and row["state"] == "refunded":
-                    await call.answer("❌ Игра отменена при перезапуске бота.", show_alert=True)
+                if row and row["game_type"] == "rps":
+                    if row["state"] == "refunded":
+                        await call.answer("❌ Бот перезагружался — эта игра отменена. Создайте новую через /start.", show_alert=True)
+                        return
+                    if row["player2"]:
+                        await call.answer("❌ В этой игре уже есть второй игрок — она началась. Создайте свою.", show_alert=True)
+                        return
+                    origin = datetime.fromisoformat(row["created_at"])
+                    elapsed = (datetime.now() - origin).total_seconds()
+                    if elapsed >= 60:
+                        await call.answer("❌ Прошло больше 60 секунд — время ожидания вышло. Создайте новую игру.", show_alert=True)
+                        return
+                    game = GameRoom(room_id, "rps", row["bet"], row["player1"])
+                    game.chat_id = row["chat_id"] or 0
+                    game.message_id = row["message_id"] or 0
+                    game.created = origin
+                    active_games[room_id] = game
+                    remaining = max(10, 60 - int(elapsed))
+                    asyncio.ensure_future(_rps_join_timeout(room_id, remaining))
+                    logger.info(f"cb_rps_join: restored {room_id} from DB ({remaining}s remaining)")
+                else:
+                    await call.answer("❌ Эта игра уже завершена или удалена. Нажмите /start чтобы создать новую.", show_alert=True)
                     return
-            except Exception:
-                pass
-            await call.answer("❌ Игра не найдена.", show_alert=True)
-            return
+            except Exception as e:
+                logger.exception(f"cb_rps_join recovery error: {e}")
+                await call.answer("❌ Ошибка восстановления игры. Создайте новую через /start.", show_alert=True)
+                return
         if game.is_finished:
-            await call.answer("❌ Игра уже завершена.", show_alert=True)
+            await call.answer("❌ Эта игра уже закончилась. Нажмите /start чтобы создать новую.", show_alert=True)
             return
         if game.player2 is not None:
-            await call.answer("❌ Место уже занято.", show_alert=True)
+            await call.answer("❌ Место уже занято — в игре уже два игрока.", show_alert=True)
             return
         if game.player1 == uid:
-            await call.answer("❌ Вы создали эту игру!", show_alert=True)
+            await call.answer("❌ Вы не можете присоединиться к своей же игре.", show_alert=True)
             return
 
         for g in active_games.values():
             if not g.is_finished and uid in (g.player1, g.player2) and g.room_id != room_id:
-                await call.answer("❌ Вы уже участвуете в другой игре!", show_alert=True)
+                await call.answer("❌ Вы уже участвуете в другой игре! Завершите её прежде чем присоединяться к новой.", show_alert=True)
                 return
 
         user = await get_user(uid)
@@ -412,14 +464,28 @@ async def cb_rps_join(call: CallbackQuery):
             await create_user(call.from_user)
             user = await get_user(uid)
         if user["balance"] < game.bet:
-            await call.answer(f"❌ Недостаточно средств! Баланс: {user['balance']}", show_alert=True)
+            await call.answer(f"❌ Недостаточно монет. Баланс: {user['balance']} 🪙, нужно: {game.bet} 🪙", show_alert=True)
             return
 
         await update_balance(uid, -game.bet, "rps_reserve")
         game.player2 = uid
+        await save_active_game(room_id, "rps", game.player1, uid, game.bet, game.chat_id, game.message_id)
 
-    await call.answer("✅ Вы присоединились!")
-    await _start_rps(game)
+    await call.answer("✅ Вы присоединились к игре! Ожидайте выбор в ЛС.")
+    try:
+        await _start_rps(game)
+    except Exception as e:
+        logger.exception(f"RPS start error for {room_id}: {e}")
+        game.is_finished = True
+        async with active_games_lock:
+            if game.room_id in active_games:
+                del active_games[game.room_id]
+        await delete_active_game(game.room_id)
+        for pid in (game.player1, game.player2):
+            if pid:
+                await update_balance(pid, game.bet, "refund_rps")
+        _rps_choices.pop(game.room_id, None)
+        _rps_pm_msgs.pop(game.room_id, None)
 
 
 @router.callback_query(F.data.startswith("rps_cancel_"))
@@ -436,17 +502,17 @@ async def cb_rps_cancel(call: CallbackQuery):
                 row = await cur.fetchone()
                 await db.close()
                 if row and row["state"] == "refunded":
-                    await call.answer("❌ Игра отменена при перезапуске бота.", show_alert=True)
+                    await call.answer("❌ Эта игра уже отменена (перезапуск бота).", show_alert=True)
                     return
             except Exception:
                 pass
-            await call.answer("❌ Игра не найдена.", show_alert=True)
+            await call.answer("❌ Эта игра уже завершена или была отменена ранее. Создайте новую через /start.", show_alert=True)
             return
         if uid != game.player1:
-            await call.answer("❌ Только создатель может отменить.", show_alert=True)
+            await call.answer("❌ Только создатель игры может её отменить.", show_alert=True)
             return
         if game.player2 is not None:
-            await call.answer("❌ Игра уже началась!", show_alert=True)
+            await call.answer("❌ Нельзя отменить — игра уже началась (второй игрок присоединился).", show_alert=True)
             return
         game.is_finished = True
         del active_games[room_id]

@@ -158,7 +158,7 @@ async def cb_bj_join(call: CallbackQuery):
                 await conn.close()
                 if row and row["game_type"] == "blackjack":
                     if row["state"] == "refunded":
-                        await call.answer("❌ Игра отменена при перезапуске.", show_alert=True)
+                        await call.answer("❌ Эта игра отменена (перезапуск бота). Создайте новую через /start.", show_alert=True)
                         return
                     game = BlackjackRoom(room_id, row["bet"], row["player1"], call.message.chat.id)
                     game.players[row["player1"]] = []
@@ -167,19 +167,19 @@ async def cb_bj_join(call: CallbackQuery):
                     active_blackjack_games[room_id] = game
                     logger.info(f"bj_join: recovered game {room_id} from DB")
                 else:
-                    await call.answer("❌ Игра уже началась или завершена!", show_alert=True)
+                    await call.answer("❌ Эта игра уже началась или завершена. Создайте новую через /start.", show_alert=True)
                     return
             except Exception as e:
                 logger.exception(f"bj_join recovery error: {e}")
-                await call.answer("❌ Игра уже началась или завершена!", show_alert=True)
+                await call.answer("❌ Ошибка восстановления игры. Создайте новую через /start.", show_alert=True)
                 return
 
         if call.from_user.id in game.players:
-            await call.answer("✅ Вы уже за этим столом!", show_alert=True)
+            await call.answer("✅ Вы уже за этим столом.", show_alert=True)
             return
 
         if len(game.players) >= 6:
-            await call.answer("❌ За столом уже 6 игроков!", show_alert=True)
+            await call.answer("❌ За столом уже 6 игроков — мест нет.", show_alert=True)
             return
 
         user = await get_user(call.from_user.id)
@@ -189,7 +189,7 @@ async def cb_bj_join(call: CallbackQuery):
 
         bj_bal = user["balance"] if user["balance"] is not None else INITIAL_BALANCE
         if bj_bal < game.bet:
-            await call.answer("❌ Недостаточно средств для блэкджека!", show_alert=True)
+            await call.answer(f"❌ Недостаточно монет. Баланс: {bj_bal} 🪙, ставка: {game.bet} 🪙", show_alert=True)
             return
 
         await update_balance(call.from_user.id, -game.bet, "bj_reserve")
@@ -229,7 +229,7 @@ async def cb_bj_start(call: CallbackQuery):
                 await conn.close()
                 if row and row["game_type"] == "blackjack":
                     if row["state"] == "refunded":
-                        await call.answer("❌ Игра была отменена после перезапуска. Ставка возвращена.", show_alert=True)
+                        await call.answer("❌ Эта игра отменена (перезапуск бота). Создайте новую через /start.", show_alert=True)
                         return
                     chat_id = call.message.chat.id
                     bet = row["bet"]
@@ -241,23 +241,23 @@ async def cb_bj_start(call: CallbackQuery):
                     active_blackjack_games[room_id] = game
                     logger.info(f"bj_start: recovered game {room_id} from DB")
                 else:
-                    await call.answer("❌ Игра не найдена!", show_alert=True)
+                    await call.answer("❌ Эта игра уже завершена или удалена. Создайте новую через /start.", show_alert=True)
                     return
             except Exception as e:
                 logger.exception(f"bj_start recovery error: {e}")
-                await call.answer("❌ Игра не найдена!", show_alert=True)
+                await call.answer("❌ Ошибка восстановления игры. Создайте новую через /start.", show_alert=True)
                 return
 
         if call.from_user.id != game.creator_id:
-            await call.answer("❌ Только создатель стола может начать игру!", show_alert=True)
+            await call.answer("❌ Только создатель стола может начать игру.", show_alert=True)
             return
 
         if game.phase != "joining":
-            await call.answer("❌ Игра уже началась!", show_alert=True)
+            await call.answer("❌ Эта игра уже началась. Дождитесь следующей или создайте новую.", show_alert=True)
             return
 
         if len(game.players) < 1:
-            await call.answer("❌ Нет игроков за столом!", show_alert=True)
+            await call.answer("❌ Нет игроков за столом. Пригласите игроков.", show_alert=True)
             return
 
         game.phase = "playing"
@@ -443,11 +443,11 @@ async def cb_bj_hit(call: CallbackQuery):
     async with active_games_lock:
         game = active_blackjack_games.get(room_id)
         if not game or game.is_finished or game.phase != "playing":
-            await call.answer("❌ Игра завершена!", show_alert=True)
+            await call.answer("❌ Эта игра уже завершена. Создайте новую через /start.", show_alert=True)
             return
 
         if game.player_status.get(player_id) != "playing":
-            await call.answer("❌ Вы уже остановились!", show_alert=True)
+            await call.answer("❌ Вы уже остановились — дождитесь результатов.", show_alert=True)
             return
 
         card = draw_card(game.deck)
@@ -490,7 +490,7 @@ async def cb_bj_stand(call: CallbackQuery):
     async with active_games_lock:
         game = active_blackjack_games.get(room_id)
         if not game or game.is_finished or game.phase != "playing":
-            await call.answer("❌ Игра завершена!", show_alert=True)
+            await call.answer("❌ Эта игра уже завершена. Создайте новую через /start.", show_alert=True)
             return
 
         if game.player_status.get(player_id) != "playing":

@@ -266,7 +266,7 @@ async def cb_solo_roll(call: CallbackQuery):
     uid = call.from_user.id
     game = _solo_games.get(uid)
     if not game:
-        await call.answer("❌ Игра не найдена или уже завершена", show_alert=True)
+        await call.answer("❌ У вас нет активной игры с ботом. Начните новую через /start.", show_alert=True)
         return
     await call.answer()
     await _process_solo_roll(call.message, uid, game)
@@ -293,7 +293,7 @@ async def cb_casino_solo_pick(call: CallbackQuery):
     parts = call.data.split("_", 3)
     game_type = parts[3]
     if game_type not in GAMES_CONFIG:
-        await call.answer("❌ Игра не найдена!", show_alert=True)
+        await call.answer("❌ Такой игры нет в списке. Выберите из меню.", show_alert=True)
         return
     cfg = GAMES_CONFIG[game_type]
     await call.message.edit_text(
@@ -315,7 +315,7 @@ async def cb_casino_solo_bet(call: CallbackQuery, state: FSMContext):
     game_type, bet_str = remaining.split("_", 1)
 
     if game_type not in GAMES_CONFIG:
-        await call.answer("❌ Игра не найдена!", show_alert=True)
+        await call.answer("❌ Такой игры нет. Вернитесь в меню.", show_alert=True)
         return
 
     if bet_str == "custom":

@@ -107,7 +107,7 @@ async def cb_join_game(call: CallbackQuery):
         async with active_games_lock:
             for rid, g in active_games.items():
                 if not g.is_finished and joiner_id in (g.player1, g.player2) and rid != room_id:
-                    await call.answer("❌ Вы уже участвуете в другой игре!", show_alert=True)
+                    await call.answer("❌ Вы уже в другой игре! Сначала завершите её, потом присоединяйтесь к новой.", show_alert=True)
                     return
 
             game = active_games.get(room_id)
@@ -119,26 +119,26 @@ async def cb_join_game(call: CallbackQuery):
                     row = await cur.fetchone()
                     await db.close()
                     if row and row["state"] == "refunded":
-                        await call.answer("❌ Игра отменена при перезапуске бота.", show_alert=True)
+                        await call.answer("❌ Эта игра отменена (перезапуск бота). Создайте новую через /start.", show_alert=True)
                         return
                 except Exception:
                     pass
-                await call.answer("❌ Игра не найдена (возможно, уже завершена).", show_alert=True)
+                await call.answer("❌ Эта игра уже завершена или удалена. Нажмите /start чтобы создать новую.", show_alert=True)
                 return
             if game.is_finished:
-                await call.answer("❌ Эта игра уже завершена.", show_alert=True)
+                await call.answer("❌ Эта игра уже закончилась. Создайте новую через /start.", show_alert=True)
                 return
             if game.player2 is not None:
-                await call.answer("❌ К этой игре уже присоединились.", show_alert=True)
+                await call.answer("❌ В этой игре уже есть игрок. Создайте свою.", show_alert=True)
                 return
 
             user = await get_user(joiner_id)
             if not user or user["balance"] < game.bet:
-                await call.answer("❌ Недостаточно средств для присоединения!", show_alert=True)
+                await call.answer(f"❌ Недостаточно монет. Баланс: {user['balance'] if user else 0} 🪙, нужно: {game.bet} 🪙", show_alert=True)
                 return
 
             if game.player1 == joiner_id:
-                await call.answer("❌ Вы не можете присоединиться к своей же игре!", show_alert=True)
+                await call.answer("❌ Вы не можете присоединиться к своей же игре.", show_alert=True)
                 return
 
             await update_balance(joiner_id, -game.bet, "reserve")
@@ -150,7 +150,7 @@ async def cb_join_game(call: CallbackQuery):
 
     except Exception as e:
         logger.exception(f"Ошибка в join_game: {e}")
-        await call.answer("❌ Произошла ошибка!", show_alert=True)
+        await call.answer("❌ Не удалось присоединиться. Попробуйте создать новую игру через /start.", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("cancelgame_"))
@@ -159,10 +159,10 @@ async def cb_cancel_game(call: CallbackQuery):
     async with active_games_lock:
         game = active_games.get(room_id)
         if not game or game.is_finished:
-            await call.answer("❌ Игра уже завершена!", show_alert=True)
+            await call.answer("❌ Эта игра уже завершена или была отменена. Создайте новую через /start.", show_alert=True)
             return
         if call.from_user.id != game.player1:
-            await call.answer("❌ Только создатель может отменить игру!", show_alert=True)
+            await call.answer("❌ Только создатель игры может её отменить.", show_alert=True)
             return
         await update_balance(game.player1, game.bet, "refund")
         if game.player2:
@@ -287,11 +287,11 @@ async def cb_roll_dice(call: CallbackQuery):
                         return
                 except Exception:
                     pass
-                await call.answer("❌ Игра завершена или не найдена!", show_alert=True)
+                await call.answer("❌ Эта игра уже завершена или удалена. Создайте новую через /start.", show_alert=True)
                 return
 
             if call.from_user.id not in (game.player1, game.player2):
-                await call.answer("❌ Вы не участник этой игры!", show_alert=True)
+                await call.answer("❌ Вы не участвуете в этой игре. Создайте свою через /start.", show_alert=True)
                 return
 
             current = game.player1 if game.player1_turn else game.player2
@@ -733,7 +733,7 @@ async def cmd_pvp_game(message: Message):
 async def cb_casino_pick_game(call: CallbackQuery):
     game_type = call.data.split("_", 3)[3]
     if game_type not in GAMES_CONFIG:
-        await call.answer("❌ Игра не найдена!", show_alert=True)
+        await call.answer("❌ Такой игры нет в списке. Выберите из меню.", show_alert=True)
         return
     cfg = GAMES_CONFIG[game_type]
     await call.message.edit_text(
@@ -752,7 +752,7 @@ async def cb_casino_pick_bet(call: CallbackQuery, state: FSMContext):
     game_type, bet_str = remaining.split("_", 1)
 
     if game_type not in GAMES_CONFIG:
-        await call.answer("❌ Игра не найдена!", show_alert=True)
+        await call.answer("❌ Такой игры нет в списке. Вернитесь в меню.", show_alert=True)
         return
 
     if bet_str == "custom":
@@ -854,7 +854,7 @@ async def process_custom_bet(message: Message, state: FSMContext):
             await create_user(message.from_user)
             user = await get_user(message.from_user.id)
         if user["balance"] < bet:
-            await message.answer(f"❌ Недостаточно средств! Баланс: {user['balance']}")
+            await message.answer(f"❌ Недостаточно монет. Баланс: {user['balance']} 🪙, нужно: {bet} 🪙")
             return
         await update_balance(message.from_user.id, -bet, "rps_reserve")
         room_id = str(uuid.uuid4())
@@ -864,7 +864,7 @@ async def process_custom_bet(message: Message, state: FSMContext):
             for g in active_games.values():
                 if not g.is_finished and message.from_user.id in (g.player1, g.player2):
                     await update_balance(message.from_user.id, bet, "refund")
-                    await message.answer("❌ Вы уже участвуете в другой игре!")
+                    await message.answer("❌ Вы уже в другой игре! Сначала завершите её.")
                     return
             active_games[room_id] = game
         p1_name = await get_username(message.from_user.id)
