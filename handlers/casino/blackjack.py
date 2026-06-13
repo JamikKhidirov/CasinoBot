@@ -196,16 +196,19 @@ async def cb_bj_join(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("bj_start_"))
 async def cb_bj_start(call: CallbackQuery):
-    room_id = call.data.split("_", 2)[2]
+    room_id = call.data.replace("bj_start_", "")
     async with active_games_lock:
         game = active_blackjack_games.get(room_id)
         if not game or game.is_finished:
             try:
                 conn = await get_db()
-                cur = await conn.execute("SELECT * FROM active_game_sessions WHERE room_id = ? AND state = 'active'", (room_id,))
+                cur = await conn.execute("SELECT * FROM active_game_sessions WHERE room_id = ?", (room_id,))
                 row = await cur.fetchone()
                 await conn.close()
                 if row and row["game_type"] == "blackjack":
+                    if row["state"] == "refunded":
+                        await call.answer("❌ Игра была отменена после перезапуска. Ставка возвращена.", show_alert=True)
+                        return
                     chat_id = call.message.chat.id
                     bet = row["bet"]
                     p1 = row["player1"]
