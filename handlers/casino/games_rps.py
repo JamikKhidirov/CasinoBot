@@ -17,6 +17,8 @@ _rps_choices: dict[str, dict[int, str]] = {}
 _rps_pm_msgs: dict[str, dict[int, int]] = {}
 
 RULES = "🪨 → ✂️ → 📄 → 🪨"
+_RPS_MAP = {"rock": "🪨", "scissors": "✂️", "paper": "📄"}
+_RPS_REV = {"🪨": "rock", "✂️": "scissors", "📄": "paper"}
 
 
 def _rps_winner(c1: str, c2: str) -> int:
@@ -27,9 +29,6 @@ def _rps_winner(c1: str, c2: str) -> int:
     return 2
 
 
-_RPS_CHOICES_MAP = {"rock": "🪨", "scissors": "✂️", "paper": "📄"}
-_RPS_CHOICES_REV = {"🪨": "rock", "✂️": "scissors", "📄": "paper"}
-
 def _rps_pick_kb(room_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🪨 Камень", callback_data=f"rps_pick_{room_id}_rock"),
@@ -39,11 +38,8 @@ def _rps_pick_kb(room_id: str) -> InlineKeyboardMarkup:
 
 
 async def _send_choice_pm(pid: int, game: GameRoom, opponent_name: str):
-    bot = get_bot()
     try:
-        bot_user = await bot.me()
-        pm_link = f"https://t.me/{bot_user.username}"
-        msg = await bot.send_message(
+        msg = await get_bot().send_message(
             pid,
             f"✂️ <b>Камень-Ножницы-Бумага!</b>\n"
             f"💵 Ставка: {game.bet} 🪙\n"
@@ -71,8 +67,7 @@ async def _start_rps(game: GameRoom):
         if mid:
             _rps_pm_msgs[game.room_id][pid] = mid
         else:
-            name = await get_username(pid)
-            failed.append(name)
+            failed.append(await get_username(pid))
 
     if failed:
         await get_bot().send_message(game.chat_id, f"❌ {' и '.join(failed)} не доступны в ЛС. Игра отменена.")
@@ -87,6 +82,7 @@ async def _start_rps(game: GameRoom):
         _rps_pm_msgs.pop(game.room_id, None)
         return
 
+    bot_username = (await get_bot().me()).username
     await get_bot().edit_message_text(
         chat_id=game.chat_id,
         message_id=game.message_id,
@@ -98,7 +94,7 @@ async def _start_rps(game: GameRoom):
             f"📖 {RULES}"
         ),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💬 Перейти в ЛС", url=f"https://t.me/{(await get_bot().me()).username}")]
+            [InlineKeyboardButton(text="💬 Перейти в ЛС", url=f"https://t.me/{bot_username}")]
         ]),
     )
 
@@ -130,11 +126,13 @@ async def _rps_timeout(game: GameRoom):
 
 async def _check_both_choices(game: GameRoom):
     choices = _rps_choices.get(game.room_id, {})
-    if game.player1 not in choices or game.player2 not in choices:
+    k1 = choices.get(game.player1)
+    k2 = choices.get(game.player2)
+    if not k1 or not k2:
         return
 
-    c1 = _RPS_CHOICES_MAP.get(choices[game.player1], choices[game.player1])
-    c2 = _RPS_CHOICES_MAP.get(choices[game.player2], choices[game.player2])
+    c1 = _RPS_MAP.get(k1, k1)
+    c2 = _RPS_MAP.get(k2, k2)
     result = _rps_winner(c1, c2)
     p1_name = await get_username(game.player1)
     p2_name = await get_username(game.player2)
@@ -180,8 +178,7 @@ async def _check_both_choices(game: GameRoom):
     for pid, mid in pm_msgs.items():
         try:
             win = (result == 1 and pid == game.player1) or (result == 2 and pid == game.player2)
-            tie = result == 0
-            if tie:
+            if result == 0:
                 await get_bot().send_message(pid, f"🎭 <b>Ничья!</b> Ставка возвращена.")
             elif win:
                 await get_bot().send_message(pid, f"🏆 <b>Вы победили!</b> +{game.bet * 2} 🪙")
@@ -195,13 +192,13 @@ async def _check_both_choices(game: GameRoom):
 @router.callback_query(F.data.startswith("rps_pick_"))
 async def cb_rps_pick(call: CallbackQuery):
     uid = call.from_user.id
-    parts = call.data.split("_", 3)
-    if len(parts) < 4:
+    parts = call.data.rsplit("_", 1)
+    if len(parts) < 2:
         await call.answer("❌ Ошибка.", show_alert=True)
         return
-    room_id = parts[2]
-    choice_key = parts[3]
-    choice = _RPS_CHOICES_MAP.get(choice_key)
+    room_id = parts[0].replace("rps_pick_", "")
+    choice_key = parts[1]
+    choice = _RPS_MAP.get(choice_key)
     if not choice:
         await call.answer("❌ Ошибка выбора.", show_alert=True)
         return
@@ -217,7 +214,7 @@ async def cb_rps_pick(call: CallbackQuery):
 
     choices = _rps_choices.setdefault(room_id, {})
     if uid in choices:
-        chosen_emoji = _RPS_CHOICES_MAP.get(choices[uid], choices[uid])
+        chosen_emoji = _RPS_MAP.get(choices[uid], choices[uid])
         await call.answer(f"✅ Вы уже выбрали {chosen_emoji}", show_alert=True)
         return
 
@@ -358,18 +355,25 @@ async def _rps_join_timeout(room_id: str, delay: int):
 @router.callback_query(F.data.startswith("rps_join_"))
 async def cb_rps_join(call: CallbackQuery):
     uid = call.from_user.id
-    room_id = call.data.split("_", 2)[2]
+    room_id = call.data.replace("rps_join_", "")
 
     async with active_games_lock:
         game = active_games.get(room_id)
-        if not game or game.is_finished or game.player2 is not None:
-            await call.answer("❌ Игра уже началась или завершена!", show_alert=True)
+        if not game:
+            await call.answer("❌ Игра не найдена.", show_alert=True)
+            return
+        if game.is_finished:
+            await call.answer("❌ Игра уже завершена.", show_alert=True)
+            return
+        if game.player2 is not None:
+            await call.answer("❌ Место уже занято.", show_alert=True)
             return
         if game.player1 == uid:
             await call.answer("❌ Вы создали эту игру!", show_alert=True)
             return
+
         for g in active_games.values():
-            if not g.is_finished and uid in (g.player1, g.player2):
+            if not g.is_finished and uid in (g.player1, g.player2) and g.room_id != room_id:
                 await call.answer("❌ Вы уже участвуете в другой игре!", show_alert=True)
                 return
 
@@ -391,10 +395,13 @@ async def cb_rps_join(call: CallbackQuery):
 @router.callback_query(F.data.startswith("rps_cancel_"))
 async def cb_rps_cancel(call: CallbackQuery):
     uid = call.from_user.id
-    room_id = call.data.split("_", 2)[2]
+    room_id = call.data.replace("rps_cancel_", "")
     async with active_games_lock:
         game = active_games.get(room_id)
-        if not game or uid != game.player1:
+        if not game:
+            await call.answer("❌ Игра не найдена.", show_alert=True)
+            return
+        if uid != game.player1:
             await call.answer("❌ Только создатель может отменить.", show_alert=True)
             return
         if game.player2 is not None:
