@@ -791,6 +791,8 @@ async def process_custom_bet(message: Message, state: FSMContext):
         await save_active_game(room_id, "rps", message.from_user.id, 0, bet)
         p1_name = await get_username(message.from_user.id)
         from .keyboards import InlineKeyboardMarkup, InlineKeyboardButton
+        bot_user = await get_bot().me()
+        pm_url = f"https://t.me/{bot_user.username}"
         sent = await message.answer(
             f"✂️ <b>Камень-Ножницы-Бумага!</b>\n"
             f"💵 Ставка: {bet} 🪙\n"
@@ -800,11 +802,11 @@ async def process_custom_bet(message: Message, state: FSMContext):
             f"Игра отменится через 60 секунд, если никто не присоединится.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="✂️ Присоединиться", callback_data=f"rps_join_{room_id}")],
+                [InlineKeyboardButton(text="💬 Перейти в ЛС", url=pm_url)],
                 [InlineKeyboardButton(text="❌ Отменить", callback_data=f"rps_cancel_{room_id}")],
             ]),
         )
         game.message_id = sent.message_id
-        import asyncio
         from .games_rps import _rps_join_timeout
         asyncio.ensure_future(_rps_join_timeout(room_id, 60))
         return

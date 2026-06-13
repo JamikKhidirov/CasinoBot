@@ -11,7 +11,7 @@ router = Router()
 
 async def safe_answer(call: CallbackQuery, *args, **kwargs):
     try:
-        await safe_answer(call, *args, **kwargs)
+        await call.answer(*args, **kwargs)
     except Exception:
         pass
 
@@ -64,9 +64,8 @@ async def cb_leave_chat(call: CallbackQuery):
         return
     partner = active_users.pop(uid)
     active_users.pop(partner, None)
-    sa = is_admin(uid)
-    await call.bot.send_message(partner, "❌ Собеседник вышел.", reply_markup=main_kb(show_admin=sa))
-    await call.message.edit_text("👋 Чат завершён.", reply_markup=main_kb(show_admin=sa))
+    await call.bot.send_message(partner, "❌ Собеседник вышел.", reply_markup=main_kb(show_admin=is_admin(partner)))
+    await call.message.edit_text("👋 Чат завершён.", reply_markup=main_kb(show_admin=is_admin(uid)))
 
 
 @router.callback_query(F.data == "cancel_search")

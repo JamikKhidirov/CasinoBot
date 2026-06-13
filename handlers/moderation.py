@@ -183,10 +183,10 @@ async def _show_chat_logs(msg: Message):
     text = "<b>📋 Последние переписки:</b>\n\n"
     buttons = []
     for i, row in enumerate(rows[:10], 1):
-        text += f"┃ {i}. {get_user_display(row[0])}\n┃ ↔ {get_user_display(row[2])} | {row[3]} сообщ.\n\n"
+        text += f"┃ {i}. {get_user_display(row[0])}\n┃ ↔ {get_user_display(row[1])} | {row[2]} сообщ.\n\n"
         n1 = get_username_safe(row[0])
-        n2 = get_username_safe(row[2])
-        buttons.append([InlineKeyboardButton(text=f"📖 #{i}  {n1[:8]}↔{n2[:8]}", callback_data=f"chatread_{row[0]}_{row[2]}")])
+        n2 = get_username_safe(row[1])
+        buttons.append([InlineKeyboardButton(text=f"📖 #{i}  {n1[:8]}↔{n2[:8]}", callback_data=f"chatread_{row[0]}_{row[1]}")])
 
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="mod_chats")])
     await msg.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
@@ -449,7 +449,7 @@ async def cmd_chatlog(message: Message):
         return
     target_id2 = None
     if len(parts) > 2:
-        target_id2 = await resolve_user(parts[2])
+        target_id2 = resolve_user(parts[2])
         if target_id2 is None:
             await message.answer("❌ Второй пользователь не найден. Укажите ID или @username.")
             return

@@ -137,13 +137,9 @@ async def blackjack_join_timeout(room_id: str, delay: int):
         game = active_blackjack_games.get(room_id)
         if not game or game.is_finished or game.phase != "joining":
             return
-        if len(game.players) < 1:
-            await update_balance(game.creator_id, game.bet, "bj_refund")
-            game.is_finished = True
-            del active_blackjack_games[room_id]
-            await delete_active_game(room_id)
+        if len(game.players) < 2:
             try:
-                await get_bot().send_message(game.chat_id, "⏰ Блэкджек отменён — никто не присоединился.")
+                await get_bot().send_message(game.chat_id, "⏰ Никто не присоединился. Нажмите «Старт» чтобы играть соло против дилера.")
             except Exception:
                 pass
 
@@ -204,8 +200,28 @@ async def cb_bj_start(call: CallbackQuery):
     async with active_games_lock:
         game = active_blackjack_games.get(room_id)
         if not game or game.is_finished:
-            await call.answer("❌ Игра не найдена!", show_alert=True)
-            return
+            try:
+                conn = await get_db()
+                cur = await conn.execute("SELECT * FROM active_game_sessions WHERE room_id = ? AND state = 'active'", (room_id,))
+                row = await cur.fetchone()
+                await conn.close()
+                if row and row["game_type"] == "blackjack":
+                    chat_id = call.message.chat.id
+                    bet = row["bet"]
+                    p1 = row["player1"]
+                    game = BlackjackRoom(room_id, bet, p1, chat_id)
+                    game.players[p1] = []
+                    game.player_names[p1] = await get_username(p1)
+                    game.phase = "joining"
+                    active_blackjack_games[room_id] = game
+                    logger.info(f"bj_start: recovered game {room_id} from DB")
+                else:
+                    await call.answer("❌ Игра не найдена!", show_alert=True)
+                    return
+            except Exception as e:
+                logger.exception(f"bj_start recovery error: {e}")
+                await call.answer("❌ Игра не найдена!", show_alert=True)
+                return
 
         if call.from_user.id != game.creator_id:
             await call.answer("❌ Только создатель стола может начать игру!", show_alert=True)
