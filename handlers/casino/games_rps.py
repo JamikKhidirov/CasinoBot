@@ -347,7 +347,6 @@ async def cb_rps_bet(call: CallbackQuery, state: FSMContext):
         await call.answer(f"❌ Недостаточно средств! Баланс: {user['balance']}", show_alert=True)
         return
 
-    await update_balance(call.from_user.id, -bet, "rps_reserve")
     room_id = str(uuid.uuid4())
     game = GameRoom(room_id, "rps", bet, call.from_user.id)
     game.chat_id = call.message.chat.id
@@ -355,10 +354,11 @@ async def cb_rps_bet(call: CallbackQuery, state: FSMContext):
     async with active_games_lock:
         for g in active_games.values():
             if not g.is_finished and call.from_user.id in (g.player1, g.player2):
-                await update_balance(call.from_user.id, bet, "refund")
                 await call.answer("❌ Вы уже участвуете в другой игре!", show_alert=True)
                 return
         active_games[room_id] = game
+
+    await update_balance(call.from_user.id, -bet, "rps_reserve")
 
     bot_user = await get_bot().me()
     pm_url = f"https://t.me/{bot_user.username}"
@@ -384,14 +384,19 @@ async def cb_rps_bet(call: CallbackQuery, state: FSMContext):
 
 
 async def _rps_join_timeout(room_id: str, delay: int):
+    p1 = None
+    bet = 0
     await asyncio.sleep(delay)
     async with active_games_lock:
         game = active_games.get(room_id)
         if not game or game.is_finished or game.player2 is not None:
             return
-        await update_balance(game.player1, game.bet, "refund_rps")
+        p1 = game.player1
+        bet = game.bet
         game.is_finished = True
         del active_games[room_id]
+    if p1:
+        await update_balance(p1, bet, "refund_rps")
     await delete_active_game(room_id)
     try:
         await get_bot().edit_message_text(
@@ -459,18 +464,24 @@ async def cb_rps_join(call: CallbackQuery):
                 await call.answer("❌ Вы уже участвуете в другой игре! Завершите её прежде чем присоединяться к новой.", show_alert=True)
                 return
 
+    # DB-операции ВНЕ блокировки
+    user = await get_user(uid)
+    if not user:
+        await create_user(call.from_user)
         user = await get_user(uid)
-        if not user:
-            await create_user(call.from_user)
-            user = await get_user(uid)
-        if user["balance"] < game.bet:
-            await call.answer(f"❌ Недостаточно монет. Баланс: {user['balance']} 🪙, нужно: {game.bet} 🪙", show_alert=True)
+    if user["balance"] < game.bet:
+        await call.answer(f"❌ Недостаточно монет. Баланс: {user['balance']} 🪙, нужно: {game.bet} 🪙", show_alert=True)
+        return
+
+    async with active_games_lock:
+        game = active_games.get(room_id)
+        if not game or game.is_finished or game.player2 is not None:
+            await call.answer("❌ Кто-то уже присоединился к этой игре.", show_alert=True)
             return
-
-        await update_balance(uid, -game.bet, "rps_reserve")
         game.player2 = uid
-        await save_active_game(room_id, "rps", game.player1, uid, game.bet, game.chat_id, game.message_id)
 
+    await update_balance(uid, -game.bet, "rps_reserve")
+    await save_active_game(room_id, "rps", game.player1, uid, game.bet, game.chat_id, game.message_id)
     await call.answer("✅ Вы присоединились к игре! Ожидайте выбор в ЛС.")
     try:
         await _start_rps(game)
