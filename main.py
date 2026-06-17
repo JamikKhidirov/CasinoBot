@@ -33,19 +33,6 @@ PUBLIC_COMMANDS = [
     BotCommand(command="unlock", description="🔓 Отменить свои игры"),
     BotCommand(command="promo", description="🎟 Активировать промокод"),
     BotCommand(command="solotop", description="⭐ Топ с ботом"),
-    # Русские алиасы
-    BotCommand(command="профиль", description="🎰 Профиль игрока"),
-    BotCommand(command="топ", description="🏆 Топ игроков"),
-    BotCommand(command="игры", description="🎮 Список игр"),
-    BotCommand(command="куб", description="🎲 Кости [ставка]"),
-    BotCommand(command="боулинг", description="🎳 Боулинг [ставка]"),
-    BotCommand(command="дротики", description="🎯 Дротики [ставка]"),
-    BotCommand(command="баскетбол", description="🏀 Баскетбол [ставка]"),
-    BotCommand(command="футбол", description="⚽ Футбол [ставка]"),
-    BotCommand(command="блекджек", description="🃏 Блэкджек [ставка]"),
-    BotCommand(command="сботом", description="🤖 Игра с ботом (в ЛС)"),
-    BotCommand(command="активные", description="🕹 Активные игры"),
-    BotCommand(command="разблокировать", description="🔓 Отменить свои игры"),
 ]
 
 ADMIN_COMMANDS = [
@@ -70,9 +57,6 @@ ADMIN_COMMANDS = [
     BotCommand(command="deletepromo", description="🎟 Удалить промокод"),
     BotCommand(command="promo_list", description="🎟 Список промокодов"),
     BotCommand(command="solotop", description="⭐ Топ с ботом"),
-    BotCommand(command="пополнить", description="💰 Пополнить баланс"),
-    BotCommand(command="одобрить", description="✅ Одобрить депозит"),
-    BotCommand(command="выводы", description="💸 Запросы на вывод"),
     BotCommand(command="addbotcoins", description="🤖 Пополнить счёт бота"),
 ]
 
@@ -161,6 +145,7 @@ async def main():
                 logger.critical("Превышено число попыток. Завершение.")
                 break
             await asyncio.sleep(5 * retries)
+
         except Exception as e:
             logger.critical(f"Неизвестная ошибка: {e}")
             break
