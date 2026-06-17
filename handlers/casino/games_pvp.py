@@ -264,6 +264,12 @@ async def ask_for_dice_roll(game: GameRoom, player_id: int):
 
     except Exception as e:
         logger.error(f"Ошибка при отправке кнопки броска: {e}")
+        pname = await get_username(player_id)
+        await get_bot().send_message(
+            game.chat_id,
+            f"⚠️ {pname}, бот не может написать вам в ЛС.\n"
+            f"Напишите боту в ЛС команду /start, чтобы я мог отправлять вам кнопки для броска.",
+        )
 
 
 @router.callback_query(F.data.startswith("roll_"))
@@ -556,7 +562,10 @@ async def determine_winner(game: GameRoom):
 
         for pid in (game.player1, game.player2):
             if pid:
-                await get_bot().send_message(pid, f"🎮 Игра завершена!\n{final}", parse_mode="HTML")
+                try:
+                    await get_bot().send_message(pid, f"🎮 Игра завершена!\n{final}", parse_mode="HTML")
+                except Exception:
+                    logger.warning(f"Не удалось отправить результат в ЛС игроку {pid}")
 
         game.is_finished = True
 
