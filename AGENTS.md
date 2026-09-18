@@ -12,6 +12,20 @@ python main.py
 
 Бот работает на `aiogram` 3.x (асинхронный, `Dispatcher.start_polling`).
 
+### Запуск в Docker
+
+```bash
+copy .env.example .env           # заполнить BOT_TOKEN и OWNER_ID
+docker compose up -d --build     # собрать и запустить
+docker compose logs -f           # логи
+docker compose down              # остановить
+```
+
+- `Dockerfile` — база `python:3.12-slim`, запуск от пользователя `bot` (не root), том `/data` для БД.
+- `config.py` читает переменные окружения (`BOT_TOKEN`, `OWNER_ID`, `OWNER_TG`, `ADMINS`, `VERSION`, `PROJECT_NAME`, `DB_NAME`, `PROXY_URL`) и откатывается на дефолты, если они не заданы.
+- `PROXY_URL` подключает прокси к сессии aiogram в `main.py`.
+- Тома: `bot_data` → `/data` (в `/data` код складывает `chat.db` и `casino.db`).
+
 ## Структура
 
 | Файл | Назначение |

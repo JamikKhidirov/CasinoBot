@@ -1,0 +1,29 @@
+# Docker Compose для CasinoBot
+#
+# 1. cp .env.example .env  и заполнить BOT_TOKEN / OWNER_ID
+# 2. docker compose up -d --build
+# 3. docker compose logs -f
+#
+# Значения подставляются из файла .env (в той же папке).
+
+services:
+  bot:
+    build: .
+    image: casinobot:latest
+    container_name: casinobot
+    restart: unless-stopped
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN:-}
+      OWNER_ID: ${OWNER_ID:-}
+      OWNER_TG: ${OWNER_TG:-}
+      ADMINS: ${ADMINS:-}
+      PROXY_URL: ${PROXY_URL:-}
+      VERSION: ${VERSION:-}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      # Персистентные БД: chat.db и casino.db (данные не теряются при пересборке)
+      - bot_data:/data
+
+volumes:
+  bot_data:
+    name: casinobot_data

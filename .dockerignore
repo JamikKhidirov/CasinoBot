@@ -1,0 +1,33 @@
+# .dockerignore — что НЕ попадает в образ
+
+# VCS / IDE
+.git/
+.github/
+.gitignore
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+
+# Секреты и локальные данные (БД создаются заново в /data)
+.env
+*.session
+*.db
+*.sqlite3
+*.db-journal
+*.log
+logs/
+bot_errors.log
+hosts
+

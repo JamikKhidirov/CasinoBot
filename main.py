@@ -81,7 +81,17 @@ async def main():
         logger.error(f"Ошибка инициализации БД: {e}")
         return
 
-    bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+    bot_options = {"default": DefaultBotProperties(parse_mode="HTML")}
+    if config.PROXY_URL:
+        try:
+            from aiogram.client.session.aiohttp import AiohttpSession
+
+            bot_options["session"] = AiohttpSession(proxy=config.PROXY_URL)
+            logger.info("Используется прокси для Telegram API")
+        except Exception as e:
+            logger.error(f"Не удалось настроить прокси ({e}) — запуск без прокси")
+
+    bot = Bot(token=config.BOT_TOKEN, **bot_options)
     casino_setup(bot)
     dp = Dispatcher()
 
