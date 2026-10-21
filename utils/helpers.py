@@ -72,7 +72,7 @@ def add_warn(user_id: int, mod_id: int) -> int:
     )
     db.conn.commit()
     if warns >= 3:
-        ban_user(user_id, mod_id, "3/3 варнов →自动 бан")
+        ban_user(user_id, mod_id, "3/3 варнов → автоматический бан")
     return warns
 
 def ban_user(user_id: int, mod_id: int, reason: str = "") -> None:

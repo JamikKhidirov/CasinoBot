@@ -6,5 +6,6 @@ bot_errors.log
 *.db
 .env
 
+!requirements.txt
 *.txt
 telethon_session.session

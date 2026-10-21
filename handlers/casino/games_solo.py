@@ -194,7 +194,7 @@ async def _process_solo_roll(msg: Message, uid: int, game_state: dict):
             )
             await conn.commit()
         elif result == "lose":
-            await update_bot_balance(uid, 0, "solo_lose")
+            await update_bot_balance(uid, -bet, "solo_lose")
             await msg.answer(
                 f"❌ <b>Бот выиграл!</b> -{bet} монет\n"
                 f"💰 Ваш счёт: {new_bal} монет",

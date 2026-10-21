@@ -48,9 +48,12 @@ def draw_card(deck: list[dict]) -> dict:
 def hand_value(cards: list[dict]) -> int:
     total = sum(CARD_VALUES[c["rank"]] for c in cards)
     aces = sum(1 for c in cards if c["rank"] == 1)
-    while total > 21 and aces > 0:
-        total -= 10
-        aces -= 1
+    # Каждый туз пробуем считать как 11, если это не приводит к перебору
+    for _ in range(aces):
+        if total + 10 <= 21:
+            total += 10
+        else:
+            break
     return total
 
 
