@@ -5,13 +5,13 @@ import sys
 
 import pytest
 
-# Убедимся, что корень проекта в пути
+# Убедимся, что корень проекта и пакет bot в пути
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "bot"))
 
 os.environ.setdefault("BOT_TOKEN", "test:token")
 os.environ.setdefault("OWNER_ID", "1")
-os.environ.setdefault("DB_NAME", ":memory:")
 
 
 @pytest.fixture(scope="session")

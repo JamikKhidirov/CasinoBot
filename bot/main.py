@@ -1,19 +1,20 @@
 import asyncio
 import logging
+import os
 import sys
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import BotCommand
 from aiogram.exceptions import TelegramNetworkError
 import config
-from db import init_db, close_db
-from handlers.user import router as user_router
-from handlers.admin import router as admin_router
-from handlers.callbacks import router as callbacks_router
-from handlers.text_handler import router as text_router
-from handlers.casino import router as casino_router, setup as casino_setup, init_db as casino_init_db
-from handlers.moderation import router as mod_router
-from handlers.developer import router as dev_router
+from db import init_db, close_db, DATA_DIR
+from chat.user import router as user_router
+from chat.admin import router as admin_router
+from chat.callbacks import router as callbacks_router
+from chat.text_handler import router as text_router
+from casino import router as casino_router, setup as casino_setup, init_db as casino_init_db
+from chat.moderation import router as mod_router
+from chat.developer import router as dev_router
 
 PUBLIC_COMMANDS = [
     BotCommand(command="start", description="Главное меню"),
@@ -67,7 +68,7 @@ async def main():
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         level=logging.INFO,
         handlers=[
-            logging.FileHandler("bot_errors.log", encoding="utf-8"),
+            logging.FileHandler(os.path.join(DATA_DIR, "bot_errors.log"), encoding="utf-8"),
             logging.StreamHandler(sys.stdout),
         ],
     )
@@ -118,7 +119,7 @@ async def main():
 
     # Возврат денег за игры, потерянные при перезапуске
     try:
-        from handlers.casino import refund_orphaned_games
+        from casino import refund_orphaned_games
         await refund_orphaned_games()
     except Exception as e:
         logger.warning(f"refund_orphaned_games: {e}")
@@ -133,7 +134,7 @@ async def main():
             await bot.set_my_commands(ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=OWNER_ID))
             # также ставим админ-команды всем админам казино
             try:
-                from handlers.casino import get_db
+                from casino import get_db
                 conn = await get_db()
                 cur = await conn.execute("SELECT admin_id FROM casino_admins")
                 admins = await cur.fetchall()

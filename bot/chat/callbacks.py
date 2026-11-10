@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Message
-from handlers.user import active_users, waiting_users
+from chat.user import active_users, waiting_users
 from utils.helpers import is_banned, is_admin, can_read_chats
 from utils.keyboards import main_kb, chat_kb, search_kb
 from config import OWNER_ID
@@ -180,7 +180,7 @@ async def cb_my_profile(call: CallbackQuery):
 @router.callback_query(F.data == "mystats")
 async def cb_my_stats(call: CallbackQuery):
     uid = call.from_user.id
-    from handlers.user import active_users
+    from chat.user import active_users
     in_chat = "✅ Да" if uid in active_users else "❌ Нет"
     text = (
         f"📊 Статистика\n\n"
@@ -195,7 +195,7 @@ async def cb_my_stats(call: CallbackQuery):
 @router.callback_query(F.data == "report_chat")
 async def cb_report_chat(call: CallbackQuery):
     uid = call.from_user.id
-    from handlers.user import active_users
+    from chat.user import active_users
     if uid not in active_users:
         await safe_answer(call, "❌ Вы не в чате.", show_alert=True)
         return

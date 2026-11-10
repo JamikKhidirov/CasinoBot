@@ -1,4 +1,4 @@
-from handlers.casino.games_rps import _rps_winner, _RPS_MAP, _RPS_REV, RULES
+from casino.games_rps import _rps_winner, _RPS_MAP, _RPS_REV, RULES
 
 
 def test_rps_map():

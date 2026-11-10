@@ -1,8 +1,27 @@
 import os
+from pathlib import Path
 
 # Секреты (BOT_TOKEN) задаются только через переменные окружения / .env.
 # Значения ниже — безопасные дефолты для остальных настроек.
 _DEFAULT_OWNER_ID = 1819756249
+
+
+def _load_dotenv() -> None:
+    """Подхватывает .env из корня проекта, не перезаписывая уже заданные переменные."""
+    path = Path(__file__).resolve().parent.parent / ".env"
+    if not path.is_file():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key and key not in os.environ:
+            os.environ[key] = value.strip().strip('"').strip("'")
+
+
+_load_dotenv()
 
 
 def _env(name: str, default: str = "") -> str:
@@ -45,7 +64,6 @@ ADMINS = list(dict.fromkeys([OWNER_ID, *_extra_admins])) if _extra_admins else [
 
 VERSION = _env("VERSION", "8.0.0")
 PROJECT_NAME = _env("PROJECT_NAME", "CasinoBot")
-DB_NAME = _env("DB_NAME", "chat.db")
 
 # Прокси для Telegram API (если API заблокирован): http://user:pass@host:8080
 PROXY_URL = _env("PROXY_URL") or None

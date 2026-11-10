@@ -1,7 +1,7 @@
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
-from handlers.user import active_users, handle_chat_text
+from chat.user import active_users, handle_chat_text
 from utils.helpers import is_banned, is_muted, update_user_activity
 
 router = Router()
@@ -13,7 +13,7 @@ async def text_dispatcher(message: Message, state: FSMContext):
         return
 
     # Skip casino game emojis (solo/PVP handlers already process them)
-    from handlers.casino.base import GAMES_CONFIG
+    from casino.base import GAMES_CONFIG
     if message.text.strip() in (cfg["emoji"] for cfg in GAMES_CONFIG.values()):
         return
 

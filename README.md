@@ -76,7 +76,7 @@ python -m venv .venv
 .venv\Scripts\activate          # Windows
 # source .venv/bin/activate     # Linux / macOS
 
-pip install -r requirements.txt
+pip install -r bot/requirements.txt
 ```
 
 ### 2️⃣ Настраиваем окружение
@@ -94,16 +94,16 @@ OWNER_ID=1819756249
 OWNER_TG=jamik_khidirov
 ```
 
-> 💡 Переменные окружения имеют приоритет, но в `config.py` есть дефолты — бот запустится даже без `.env`.
+> 💡 Все настройки читаются из переменных окружения / `.env`. `BOT_TOKEN` обязателен — без него бот не запустится.
 
 ### 3️⃣ Запускаем
 
 ```bash
-python main.py
+python bot/main.py
 ```
 
 - ✅ Бот работает на **long polling** — вебхуки и открытые порты не нужны.
-- 📄 Логи пишутся в консоль и в файл `bot_errors.log`.
+- 📄 Логи пишутся в консоль и в файл `data/bot_errors.log`.
 - ❗ Если Telegram API недоступен (`ConnectTimeout`) — включите VPN или задайте `PROXY_URL`.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:f7b32b,100:302b63&height=4&width=1000" width="100%"/>
@@ -144,7 +144,7 @@ docker compose down             # остановить
 | Рабочая папка | `/app` |
 | Пользователь | `bot` (не root) |
 | Данные | `/data` → том `casinobot_data` |
-| Точка входа | `python main.py` |
+| Точка входа | `python bot/main.py` |
 
 - 💾 БД `chat.db` и `casino.db` код создаёт в `/data`, поэтому том монтируется **именно в `/data`** — иначе данные пропадут при пересборке.
 - 🌐 Порты не нужны: бот работает через long polling (`EXPOSE 8080` оставлен для платформ, требующих порт).
@@ -153,7 +153,7 @@ docker compose down             # остановить
 
 ### ☁️ Деплой на Amvera
 
-В репозитории есть `amvera.yml` (persistenceMount `/data`, script `main.py`):
+В репозитории есть `amvera.yml` (persistenceMount `/data`, script `bot/main.py`):
 
 ```bash
 git push amvera master
@@ -266,34 +266,37 @@ flowchart TD
 
 ```
 CasinoBot/
-├── main.py                     # Точка входа: Bot + Dispatcher + polling
-├── config.py                   # Настройки (ENV + дефолты)
-├── db.py                       # SQLite: users, messages, bans, reports, appeals, moderation
-├── requirements.txt            # Зависимости
+├── bot/                        # Код приложения
+│   ├── main.py                 # Точка входа: Bot + Dispatcher + polling
+│   ├── config.py               # Настройки (ENV + дефолты)
+│   ├── db.py                   # SQLite: users, messages, bans, reports, appeals, moderation
+│   ├── requirements.txt        # Зависимости
+│   ├── chat/                   # Анонимный чат
+│   │   ├── user.py             # /start, поиск собеседника
+│   │   ├── callbacks.py        # Инлайн-кнопки чата и казино
+│   │   ├── text_handler.py     # Диспетчер текстовых сообщений
+│   │   ├── admin.py            # /stats
+│   │   ├── moderation.py       # Баны, муты, варны, /mod
+│   │   └── developer.py        # Выдача прав, рассылка
+│   ├── casino/                 # Казино
+│   │   ├── base.py             # GameRoom, BlackjackRoom, БД, утилиты
+│   │   ├── menu.py             # Меню, /games, /top, /active
+│   │   ├── profile.py          # Профиль, пополнение, вывод, промокоды
+│   │   ├── games_pvp.py        # Кости, боулинг, дротики, баскетбол, футбол
+│   │   ├── games_solo.py       # Игры против бота
+│   │   ├── games_rps.py        # Камень-ножницы-бумага
+│   │   ├── blackjack.py        # Блэкджек до 6 игроков
+│   │   ├── admin.py            # Админ-панель казино
+│   │   └── keyboards.py        # Клавиатуры казино
+│   └── utils/
+│       ├── keyboards.py        # Главное меню, клавиатуры чата
+│       └── helpers.py          # is_admin, is_banned, save_message
+├── data/                       # Runtime: chat.db, casino.db, логи (не в git)
+├── tests/                      # pytest-тесты
 ├── Dockerfile                  # Образ для хостинга
 ├── docker-compose.yml          # Запуск одной командой
 ├── amvera.yml                  # Деплой на Amvera
-├── .env.example                # Шаблон переменных окружения
-├── handlers/
-│   ├── user.py                 # /start, поиск собеседника
-│   ├── callbacks.py            # Инлайн-кнопки чата и казино
-│   ├── text_handler.py         # Диспетчер текстовых сообщений
-│   ├── admin.py                # /stats
-│   ├── moderation.py           # Баны, муты, варны, /mod
-│   ├── developer.py            # Выдача прав, рассылка
-│   ├── casino/
-│       ├── base.py             # GameRoom, BlackjackRoom, БД, утилиты
-│       ├── menu.py             # Меню, /games, /top, /active
-│       ├── profile.py          # Профиль, пополнение, вывод, промокоды
-│       ├── games_pvp.py        # Кости, боулинг, дротики, баскетбол, футбол
-│       ├── games_solo.py       # Игры против бота
-│       ├── games_rps.py        # Камень-ножницы-бумага
-│       ├── blackjack.py        # Блэкджек до 6 игроков
-│       ├── admin.py            # Админ-панель казино
-│       └── keyboards.py        # Клавиатуры казино
-└── utils/
-    ├── keyboards.py            # Главное меню, клавиатуры чата
-    └── helpers.py              # is_admin, is_banned, save_message
+└── .env.example                # Шаблон переменных окружения
 ```
 
 ## ⚙️ Конфигурация
@@ -306,25 +309,24 @@ CasinoBot/
 | `ADMINS` | — | Доп. админы через запятую: `111,222` |
 | `VERSION` | — | Версия бота (по умолчанию `8.0.0`) |
 | `PROJECT_NAME` | — | Название проекта |
-| `PROXY_URL` | — | Прокси для Telegram API: `http://user:pass@host:8080` или `socks5://host:1080`. Требует пакет `aiohttp-socks` (уже в `requirements.txt`) |
-| `DB_NAME` | — | Имя файла БД чата (по умолчанию `chat.db`) |
+| `PROXY_URL` | — | Прокси для Telegram API: `http://user:pass@host:8080` или `socks5://host:1080`. Требует пакет `aiohttp-socks` (уже в `bot/requirements.txt`) |
 
 ### 🧠 Тонкости, которые стоит знать
 
 - 🐍 **Python 3.10+**: в `db.py` используется синтаксис `sqlite3.Connection | None`.
-- 🗄 **Базы данных**: `chat.db` (чат) и `casino.db` (казино). Если существует папка `/data` — файлы пишутся туда (Amvera, Docker), иначе в корень проекта.
+- 🗄 **Базы данных**: `chat.db` (чат) и `casino.db` (казино). Если существует папка `/data` — файлы пишутся туда (Amvera, Docker), иначе в локальную папку `data/`.
 - 🚫 **Импорт БД**: используйте `import db` и `db.cur`, а не `from db import cur` — иначе получите `None`.
-- 📄 **Логи**: `bot_errors.log` + stdout, поэтому `docker compose logs -f` показывает всё.
+- 📄 **Логи**: `data/bot_errors.log` + stdout, поэтому `docker compose logs -f` показывает всё.
 - ✂️ Сообщения длиннее 4096 символов обрезаются до `[:3997] + "..."`.
 - 🔁 Ставки за игры, потерянные при перезапуске, возвращаются (`refund_orphaned_games`).
 - 📡 При сетевых ошибках (`TelegramNetworkError`) polling повторяется до 10 раз с растущей паузой.
-- 🔐 Токен по умолчанию прописан в `config.py` — в публичном репозитории передавайте свой через `BOT_TOKEN`.
+- 🔐 Токен задаётся только через переменную окружения `BOT_TOKEN` (в коде токена нет).
 
 ## 🤝 Как помочь проекту
 
 1. Форкните репозиторий и создайте ветку от `develop`.
 2. Держитесь стиля проекта: aiogram 3.x, HTML-разметка, русские тексты сообщений.
-3. Проверьте запуск локально: `python main.py`.
+3. Проверьте запуск локально: `python bot/main.py`.
 4. Откройте Pull Request с описанием изменений.
 
 ## 📄 Лицензия

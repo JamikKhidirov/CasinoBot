@@ -1,7 +1,8 @@
 import sqlite3
 import os
 
-DATA_DIR = "/data" if os.path.exists("/data") else "."
+DATA_DIR = "/data" if os.path.exists("/data") else "data"
+os.makedirs(DATA_DIR, exist_ok=True)
 DB_NAME = os.path.join(DATA_DIR, "chat.db")
 conn: sqlite3.Connection | None = None
 cur: sqlite3.Cursor | None = None

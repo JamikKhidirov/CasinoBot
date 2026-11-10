@@ -1,12 +1,19 @@
 .venv/
+venv/
 __pycache__/
-*.pyc
+*.py[cod]
 .idea/
 .pytest_cache/
+.mypy_cache/
 
 # Runtime data and secrets
 .env
 *.db
+*.sqlite3
+*.db-journal
 *.session
-bot_errors.log
+*.log
+logs/
+data/*
+!data/.gitkeep
 _check.txt

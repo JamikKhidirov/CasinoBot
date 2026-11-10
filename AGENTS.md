@@ -7,7 +7,7 @@ Telegram-бот с режимами: **анонимный чат** (поиск �
 ## Запуск
 
 ```bash
-python main.py
+python bot/main.py
 ```
 
 Бот работает на `aiogram` 3.x (асинхронный, `Dispatcher.start_polling`).
@@ -22,43 +22,43 @@ docker compose down              # остановить
 ```
 
 - `Dockerfile` — база `python:3.12-slim`, запуск от пользователя `bot` (не root), том `/data` для БД.
-- `config.py` читает переменные окружения (`BOT_TOKEN`, `OWNER_ID`, `OWNER_TG`, `ADMINS`, `VERSION`, `PROJECT_NAME`, `DB_NAME`, `PROXY_URL`). `BOT_TOKEN` обязателен, остальные параметры имеют безопасные дефолты.
-- `PROXY_URL` подключает прокси к сессии aiogram в `main.py`.
+- `bot/config.py` читает переменные окружения (`BOT_TOKEN`, `OWNER_ID`, `OWNER_TG`, `ADMINS`, `VERSION`, `PROJECT_NAME`, `PROXY_URL`). `BOT_TOKEN` обязателен, остальные параметры имеют безопасные дефолты.
+- `PROXY_URL` подключает прокси к сессии aiogram в `bot/main.py`.
 - Тома: `bot_data` → `/data` (в `/data` код складывает `chat.db` и `casino.db`).
 
 ## Структура
 
 | Файл | Назначение |
 |------|-----------|
-| `main.py` | Точка входа, создание Bot/Dispatcher, запуск polling |
-| `config.py` | `BOT_TOKEN`, `OWNER_ID`, `ADMINS`, `VERSION`, `PROXY_URL` |
-| `db.py` | Инициализация SQLite (`chat.db`), таблицы `users`, `bans`, `messages` |
-| `handlers/text_handler.py` | Диспетчер текстовых сообщений |
-| `handlers/user.py` | Хендлер `/start`, состояние `active_users`/`waiting_users` для чата |
-| `handlers/casino/games_rps.py` | Камень-ножницы-бумага (PVP, выбор в ЛС, таймер 30с) |
-| `handlers/casino/games_pvp.py` | PVP-игры (кости, боулинг, дротики, баскетбол, футбол) |
-| `handlers/casino/games_solo.py` | Игры с ботом (в ЛС) |
-| `handlers/casino/blackjack.py` | Блэкджек (до 6 игроков, в группах) |
-| `handlers/casino/menu.py` | Меню казино, список игр, топ, активные игры |
-| `handlers/casino/profile.py` | Профиль, пополнение, вывод, промокоды |
-| `handlers/casino/admin.py` | Админ-панель казино |
-| `handlers/casino/base.py` | База казино: GameRoom, BlackjackRoom, БД, общие утилиты |
-| `handlers/callbacks.py` | Callback'и чата + казино + общие (back/help) + `/help` |
-| `handlers/admin.py` | Админ-команды: `/stats` |
-| `handlers/moderation.py` | Модерация: бан, мут, варны, админ-панель |
-| `handlers/developer.py` | Dev-команды: выдача прав, рассылка |
-| `utils/keyboards.py` | Inline-клавиатуры (главное меню, чат, казино) |
-| `utils/helpers.py` | Хелперы: `is_admin`, `is_banned`, `save_message` |
-| `requirements.txt` | `aiogram>=3.12`, `aiosqlite`, `aiohttp-socks`, `pytest`, `pytest-asyncio` |
-| `casino.db` | БД казино (SQLite, aiosqlite) |
+| `bot/main.py` | Точка входа, создание Bot/Dispatcher, запуск polling |
+| `bot/config.py` | `BOT_TOKEN`, `OWNER_ID`, `ADMINS`, `VERSION`, `PROXY_URL` |
+| `bot/db.py` | Инициализация SQLite (`data/chat.db`), таблицы `users`, `bans`, `messages` |
+| `bot/chat/text_handler.py` | Диспетчер текстовых сообщений |
+| `bot/chat/user.py` | Хендлер `/start`, состояние `active_users`/`waiting_users` для чата |
+| `bot/casino/games_rps.py` | Камень-ножницы-бумага (PVP, выбор в ЛС, таймер 30с) |
+| `bot/casino/games_pvp.py` | PVP-игры (кости, боулинг, дротики, баскетбол, футбол) |
+| `bot/casino/games_solo.py` | Игры с ботом (в ЛС) |
+| `bot/casino/blackjack.py` | Блэкджек (до 6 игроков, в группах) |
+| `bot/casino/menu.py` | Меню казино, список игр, топ, активные игры |
+| `bot/casino/profile.py` | Профиль, пополнение, вывод, промокоды |
+| `bot/casino/admin.py` | Админ-панель казино |
+| `bot/casino/base.py` | База казино: GameRoom, BlackjackRoom, БД, общие утилиты |
+| `bot/chat/callbacks.py` | Callback'и чата + казино + общие (back/help) + `/help` |
+| `bot/chat/admin.py` | Админ-команды: `/stats` |
+| `bot/chat/moderation.py` | Модерация: бан, мут, варны, админ-панель |
+| `bot/chat/developer.py` | Dev-команды: выдача прав, рассылка |
+| `bot/utils/keyboards.py` | Inline-клавиатуры (главное меню, чат, казино) |
+| `bot/utils/helpers.py` | Хелперы: `is_admin`, `is_banned`, `save_message` |
+| `bot/requirements.txt` | `aiogram>=3.12`, `aiosqlite`, `aiohttp-socks`, `pytest`, `pytest-asyncio` |
+| `data/` | Runtime-данные: `chat.db`, `casino.db`, `bot_errors.log` (не в git) |
 
 ## Важные замечания
 
 - **BOT_TOKEN** — задаётся только через переменные окружения / `.env` (в коде токена нет).
-- **Прокси** — если Telegram API заблокирован (ошибка `ConnectTimeout`), задайте `PROXY_URL` в `config.py` (например `"http://proxy:8080"` или `"socks5://proxy:1080"`).
+- **Прокси** — если Telegram API заблокирован (ошибка `ConnectTimeout`), задайте `PROXY_URL` в `.env` / окружении (например `"http://proxy:8080"` или `"socks5://proxy:1080"`).
 - **База данных** — SQLite (`chat.db`, `casino.db`). Инициализация таблиц при первом запуске. Файлы БД — runtime-данные и не хранятся в git.
-- **На amvera** БД сохраняются в `/data/` (persistenceMount). Локально — в корне проекта.
-- **Логи** пишутся в `bot_errors.log`.
+- **На amvera** БД сохраняются в `/data/` (persistenceMount). Локально — в папке `data/`.
+- **Логи** пишутся в `data/bot_errors.log`.
 - **Ветки**: `master` и `develop`.
 - **Пополнение**: администратор вводит реквизиты → пользователь оплачивает → админ подтверждает → монеты зачисляются.
 - **Эмодзи-бросок**: можно отправить 🎲🏀⚽🎳🎯 в чат с ботом как бросок (помимо кнопок).

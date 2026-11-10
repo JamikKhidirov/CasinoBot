@@ -23,7 +23,7 @@ WORKDIR /app
 
 # --- Зависимости отдельным слоем (кешируется между сборками) ---
 RUN python -m venv "$VIRTUAL_ENV"
-COPY requirements.txt ./
+COPY bot/requirements.txt ./
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
 # --- Код проекта ---
@@ -42,4 +42,4 @@ VOLUME ["/data"]
 # EXPOSE оставлен для платформ, требующих открытый порт.
 EXPOSE 8080
 
-CMD ["python", "main.py"]
+CMD ["python", "bot/main.py"]

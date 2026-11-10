@@ -15,7 +15,8 @@ from config import OWNER_ID as ADMIN_ID
 logger = logging.getLogger(__name__)
 
 COMMISSION_RATE = Decimal("0.1")
-DATA_DIR = "/data" if os.path.exists("/data") else "."
+DATA_DIR = "/data" if os.path.exists("/data") else "data"
+os.makedirs(DATA_DIR, exist_ok=True)
 DB_NAME = os.path.join(DATA_DIR, "casino.db")
 INITIAL_BALANCE = 1000
 INITIAL_BOT_BALANCE = 500

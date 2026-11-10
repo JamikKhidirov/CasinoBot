@@ -5,10 +5,10 @@ meta:
     name: pip
     version: 3.11
 build:
-  requirementsPath: requirements.txt
+  requirementsPath: bot/requirements.txt
   useCache: true
 run:
   persistenceMount: /data
-  scriptName: main.py
+  scriptName: bot/main.py
   containerPort: 80
   servicePort: 80

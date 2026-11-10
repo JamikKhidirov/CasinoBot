@@ -6,7 +6,7 @@ from utils.helpers import (
     ban_user, unban_user, mute_user, unmute_user, can_moderate, get_username_safe,
     get_user_display, can_read_chats, resolve_user,
 )
-from handlers.user import active_users, waiting_users
+from chat.user import active_users, waiting_users
 import db
 
 router = Router()

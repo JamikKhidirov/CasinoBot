@@ -1,4 +1,4 @@
-from handlers.casino.blackjack import (
+from casino.blackjack import (
     create_deck,
     draw_card,
     hand_value,

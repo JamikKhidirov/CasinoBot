@@ -282,7 +282,7 @@ async def cmd_dev_setcoins(message: Message, command: CommandObject):
         await message.answer("❌ ID и сумма должны быть числами")
         return
     try:
-        from handlers.casino.base import update_balance
+        from casino.base import update_balance
         await update_balance(uid, amount, "dev_setcoins")
         await message.answer(f"✅ Баланс {uid} = {amount} монет")
     except Exception as e:

@@ -20,7 +20,11 @@ env/
 .pytest_cache/
 .mypy_cache/
 
-# Секреты и локальные данные (БД создаются заново в /data)
+# Тесты и локальные данные (БД создаются заново в /data)
+tests/
+data/
+
+# Секреты и локальные данные
 .env
 *.session
 *.db
@@ -30,4 +34,3 @@ env/
 logs/
 bot_errors.log
 hosts
-
