@@ -1,13 +1,7 @@
 aiogram>=3.12.0
 aiosqlite>=0.20.0
 aiohttp-socks>=0.8.4
-phonenumbers>=8.13.0
-httpx>=0.27.0
-dnspython>=2.6.0
-python-dotenv>=1.0.0
-python-telegram-bot>=20.0
-telethon>=1.36.0
 
-# Тестирование
+# Тесты
 pytest>=8.0.0
 pytest-asyncio>=0.23.0

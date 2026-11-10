@@ -6,8 +6,6 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-from decimal import Decimal
-
 from .base import (
     get_bot, get_db, get_user, create_user, update_balance, get_username,
     GameRoom, active_games, active_games_lock,

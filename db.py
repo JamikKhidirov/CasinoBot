@@ -1,7 +1,5 @@
 import sqlite3
-import datetime
 import os
-import logging
 
 DATA_DIR = "/data" if os.path.exists("/data") else "."
 DB_NAME = os.path.join(DATA_DIR, "chat.db")

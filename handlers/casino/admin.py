@@ -5,11 +5,11 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from .base import (
-    get_bot, get_db, get_user, create_user, update_balance, update_bot_balance, get_username,
-    is_casino_admin, is_owner, has_perm, get_admin_perms, ADMIN_ID, PERMISSIONS, AdminAction, logger,
+    get_bot, get_db, update_balance, update_bot_balance, get_username,
+    is_casino_admin, is_owner, has_perm, get_admin_perms, AdminAction,
 )
 from .keyboards import casino_admin_kb
-from utils.helpers import resolve_user, ban_user, unban_user, mute_user, unmute_user, add_warn, get_warns, is_banned, is_muted, can_moderate
+from utils.helpers import resolve_user, ban_user, mute_user, add_warn, get_warns, is_banned, is_muted, can_moderate
 
 
 class AdminModState(StatesGroup):
@@ -534,7 +534,6 @@ async def cb_admin_withdraw_reject(call: CallbackQuery):
         await get_bot().send_message(row["user_id"], "❌ Ваш запрос на вывод был отклонён.")
     finally:
         await conn.close()
-    await call.answer("❌ Отклонено")
     await cb_casino_admin_withdrawals(call)
 
 
@@ -562,7 +561,6 @@ async def cb_admin_reject_deposit(call: CallbackQuery):
         await get_bot().send_message(row["user_id"], "❌ Ваш запрос на пополнение был отклонён.")
     finally:
         await conn.close()
-    await call.answer("❌ Отклонено")
     await cb_casino_admin_pending(call)
 
 

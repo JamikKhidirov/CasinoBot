@@ -22,7 +22,7 @@ docker compose down              # остановить
 ```
 
 - `Dockerfile` — база `python:3.12-slim`, запуск от пользователя `bot` (не root), том `/data` для БД.
-- `config.py` читает переменные окружения (`BOT_TOKEN`, `OWNER_ID`, `OWNER_TG`, `ADMINS`, `VERSION`, `PROJECT_NAME`, `DB_NAME`, `PROXY_URL`) и откатывается на дефолты, если они не заданы.
+- `config.py` читает переменные окружения (`BOT_TOKEN`, `OWNER_ID`, `OWNER_TG`, `ADMINS`, `VERSION`, `PROJECT_NAME`, `DB_NAME`, `PROXY_URL`). `BOT_TOKEN` обязателен, остальные параметры имеют безопасные дефолты.
 - `PROXY_URL` подключает прокси к сессии aiogram в `main.py`.
 - Тома: `bot_data` → `/data` (в `/data` код складывает `chat.db` и `casino.db`).
 
@@ -49,14 +49,14 @@ docker compose down              # остановить
 | `handlers/developer.py` | Dev-команды: выдача прав, рассылка |
 | `utils/keyboards.py` | Inline-клавиатуры (главное меню, чат, казино) |
 | `utils/helpers.py` | Хелперы: `is_admin`, `is_banned`, `save_message` |
-| `requirements.txt` | `aiogram>=3.12`, `aiosqlite`, `phonenumbers`, `httpx`, `dnspython` |
+| `requirements.txt` | `aiogram>=3.12`, `aiosqlite`, `aiohttp-socks`, `pytest`, `pytest-asyncio` |
 | `casino.db` | БД казино (SQLite, aiosqlite) |
 
 ## Важные замечания
 
-- **Токен в `config.py`** — жёстко зашит. Для продакшена вынести в переменные окружения.
+- **BOT_TOKEN** — задаётся только через переменные окружения / `.env` (в коде токена нет).
 - **Прокси** — если Telegram API заблокирован (ошибка `ConnectTimeout`), задайте `PROXY_URL` в `config.py` (например `"http://proxy:8080"` или `"socks5://proxy:1080"`).
-- **База данных** — SQLite (`chat.db`, `casino.db`). Инициализация таблиц при первом запуске.
+- **База данных** — SQLite (`chat.db`, `casino.db`). Инициализация таблиц при первом запуске. Файлы БД — runtime-данные и не хранятся в git.
 - **На amvera** БД сохраняются в `/data/` (persistenceMount). Локально — в корне проекта.
 - **Логи** пишутся в `bot_errors.log`.
 - **Ветки**: `master` и `develop`.

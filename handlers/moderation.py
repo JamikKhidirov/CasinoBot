@@ -1,14 +1,13 @@
 from aiogram import Router, F
-from aiogram.filters import Command, CommandObject
+from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from utils.helpers import (
     is_admin, is_banned, is_muted, get_warns, add_warn,
     ban_user, unban_user, mute_user, unmute_user, can_moderate, get_username_safe,
-    get_user_display, can_read_chats, resolve_user, is_dev,
+    get_user_display, can_read_chats, resolve_user,
 )
 from handlers.user import active_users, waiting_users
 import db
-import datetime
 
 router = Router()
 
@@ -343,6 +342,9 @@ async def cmd_mute(message: Message):
     except ValueError:
         await message.answer("❌ Некорректное время.")
         return
+    if minutes <= 0:
+        await message.answer("❌ Время мута должно быть больше 0 минут.")
+        return
     if not can_moderate(message.from_user.id, target_id):
         await message.answer("❌ Вы не можете замутить этого пользователя.")
         return
@@ -412,7 +414,15 @@ async def cmd_check(message: Message):
     name = get_username_safe(target_id)
     banned = "🚫 Да" if is_banned(target_id) else "✅ Нет"
     muted = is_muted(target_id)
-    mute_status = f"🔇 Да (до {muted})" if muted else "🔊 Нет"
+    mute_status = "🔊 Нет"
+    if muted:
+        try:
+            db.cur.execute("SELECT muted_until FROM moderation WHERE user_id = ?", (target_id,))
+            row = db.cur.fetchone()
+            until = row[0] if row else None
+            mute_status = f"🔇 Да (до {until})" if until else "🔇 Да"
+        except Exception:
+            mute_status = "🔇 Да"
     warns = get_warns(target_id)
     in_chat = "💬 Да" if target_id in active_users else "💤 Нет"
     in_search = "🔍 Да" if target_id in waiting_users else "—"

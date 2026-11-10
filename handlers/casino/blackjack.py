@@ -1,7 +1,7 @@
 import asyncio
+import json
 import random
 import uuid
-from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -130,74 +130,170 @@ async def cmd_blackjack(message: Message):
     game.join_message_id = msg.message_id
     game.phase = "joining"
 
-    await save_active_game(room_id, "blackjack", message.from_user.id, 0, bet, message.chat.id, msg.message_id)
+    await save_active_game(room_id, "blackjack", message.from_user.id, 0, bet, message.chat.id, msg.message_id, players=[message.from_user.id])
     asyncio.ensure_future(blackjack_join_timeout(room_id, 60))
 
 
 async def blackjack_join_timeout(room_id: str, delay: int):
+    """Закрывает стол, если за отведённое время никто не начал игру."""
     await asyncio.sleep(delay)
+    players: list[int] = []
     async with active_games_lock:
         game = active_blackjack_games.get(room_id)
         if not game or game.is_finished or game.phase != "joining":
             return
-        if len(game.players) < 2:
-            try:
-                await get_bot().send_message(game.chat_id, "⏰ Никто не присоединился. Нажмите «Старт» чтобы играть соло против дилера.")
-            except Exception:
-                pass
+        players = list(game.players.keys())
+        game.is_finished = True
+        game.phase = "finished"
+        active_blackjack_games.pop(room_id, None)
+
+    for pid in players:
+        try:
+            await update_balance(pid, game.bet, "bj_refund_timeout")
+        except Exception:
+            logger.exception(f"Не удалось вернуть ставку блэкджека игроку {pid}")
+
+    await delete_active_game(room_id)
+    try:
+        await get_bot().edit_message_text(
+            chat_id=game.chat_id,
+            message_id=game.join_message_id,
+            text="⏰ Время ожидания истекло — стол закрыт.\n💰 Ставки возвращены.",
+        )
+    except Exception:
+        try:
+            await get_bot().send_message(
+                game.chat_id,
+                "⏰ Время ожидания истекло — стол закрыт.\n💰 Ставки возвращены.",
+            )
+        except Exception:
+            pass
+
+
+async def _recover_bj_game(room_id: str, chat_id: int):
+    """Пытается восстановить стол блэкджека из БД. Возвращает (game, error)."""
+    conn = await get_db()
+    try:
+        cur = await conn.execute(
+            "SELECT * FROM active_game_sessions WHERE room_id = ?", (room_id,)
+        )
+        row = await cur.fetchone()
+    finally:
+        await conn.close()
+
+    if not row or row["game_type"] != "blackjack":
+        return None, "missing"
+    if row["state"] == "refunded":
+        return None, "refunded"
+
+    game = BlackjackRoom(room_id, row["bet"], row["player1"], chat_id)
+    player_ids = [row["player1"]]
+    try:
+        raw_players = row["players"]
+        if raw_players:
+            parsed = json.loads(raw_players)
+            if parsed:
+                player_ids = [int(x) for x in parsed]
+    except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
+        pass
+    for pid in dict.fromkeys(pid for pid in player_ids if pid):
+        game.players[pid] = []
+        game.player_names[pid] = await get_username(pid)
+    game.phase = "joining"
+    logger.info(f"bj: recovered game {room_id} from DB ({len(game.players)} players)")
+    return game, None
+
+
+def _bj_error_text(error: str) -> str:
+    if error == "refunded":
+        return "❌ Эта игра отменена (перезапуск бота). Создайте новую через /start."
+    return "❌ Эта игра уже завершена или удалена. Создайте новую через /start."
+
+
+async def _get_or_recover_bj(room_id: str, chat_id: int):
+    """Возвращает актуальный стол из памяти или из БД (без долгого удержания lock)."""
+    async with active_games_lock:
+        game = active_blackjack_games.get(room_id)
+        if game and game.is_finished:
+            game = None
+    if game:
+        return game, None
+
+    recovered, error = await _recover_bj_game(room_id, chat_id)
+    if not recovered:
+        return None, error
+
+    async with active_games_lock:
+        existing = active_blackjack_games.get(room_id)
+        if existing and not existing.is_finished:
+            return existing, None
+        active_blackjack_games[room_id] = recovered
+    return recovered, None
 
 
 @router.callback_query(F.data.startswith("bj_join_"))
 async def cb_bj_join(call: CallbackQuery):
     room_id = call.data.split("_", 2)[2]
-    logger.info(f"bj_join: room_id={room_id}, uid={call.from_user.id}, in_memory={room_id in active_blackjack_games}")
-    async with active_games_lock:
-        game = active_blackjack_games.get(room_id)
-        if not game or game.is_finished or game.phase != "joining":
-            try:
-                conn = await get_db()
-                cur = await conn.execute("SELECT * FROM active_game_sessions WHERE room_id = ?", (room_id,))
-                row = await cur.fetchone()
-                await conn.close()
-                if row and row["game_type"] == "blackjack":
-                    if row["state"] == "refunded":
-                        await call.answer("❌ Эта игра отменена (перезапуск бота). Создайте новую через /start.", show_alert=True)
-                        return
-                    game = BlackjackRoom(room_id, row["bet"], row["player1"], call.message.chat.id)
-                    game.players[row["player1"]] = []
-                    game.player_names[row["player1"]] = await get_username(row["player1"])
-                    game.phase = "joining"
-                    active_blackjack_games[room_id] = game
-                    logger.info(f"bj_join: recovered game {room_id} from DB")
-                else:
-                    await call.answer("❌ Эта игра уже началась или завершена. Создайте новую через /start.", show_alert=True)
-                    return
-            except Exception as e:
-                logger.exception(f"bj_join recovery error: {e}")
-                await call.answer("❌ Ошибка восстановления игры. Создайте новую через /start.", show_alert=True)
-                return
+    uid = call.from_user.id
+    logger.info(f"bj_join: room_id={room_id}, uid={uid}, in_memory={room_id in active_blackjack_games}")
 
-        if call.from_user.id in game.players:
+    game, error = await _get_or_recover_bj(room_id, call.message.chat.id)
+    if not game:
+        await call.answer(_bj_error_text(error), show_alert=True)
+        return
+
+    async with active_games_lock:
+        if uid in game.players:
             await call.answer("✅ Вы уже за этим столом.", show_alert=True)
             return
-
         if len(game.players) >= 6:
             await call.answer("❌ За столом уже 6 игроков — мест нет.", show_alert=True)
             return
-
-        user = await get_user(call.from_user.id)
-        if not user:
-            await create_user(call.from_user)
-            user = await get_user(call.from_user.id)
-
-        bj_bal = user["balance"] if user["balance"] is not None else INITIAL_BALANCE
-        if bj_bal < game.bet:
-            await call.answer(f"❌ Недостаточно монет. Баланс: {bj_bal} 🪙, ставка: {game.bet} 🪙", show_alert=True)
+        if game.is_finished or game.phase != "joining":
+            await call.answer("❌ Эта игра уже началась или завершена. Создайте новую через /start.", show_alert=True)
             return
+        bet = game.bet
 
-        await update_balance(call.from_user.id, -game.bet, "bj_reserve")
-        game.players[call.from_user.id] = []
-        game.player_names[call.from_user.id] = await get_username(call.from_user.id)
+    user = await get_user(uid)
+    if not user:
+        await create_user(call.from_user)
+        user = await get_user(uid)
+
+    bj_bal = user["balance"] if user and user["balance"] is not None else INITIAL_BALANCE
+    if bj_bal < bet:
+        await call.answer(f"❌ Недостаточно монет. Баланс: {bj_bal} 🪙, ставка: {bet} 🪙", show_alert=True)
+        return
+
+    # Резервируем ставку вне active_games_lock
+    await update_balance(uid, -bet, "bj_reserve")
+    player_name = await get_username(uid)
+
+    joined = False
+    reason = "❌ Не удалось присоединиться. Создайте новую игру через /start."
+    async with active_games_lock:
+        current = active_blackjack_games.get(room_id)
+        if not current or current.is_finished or current.phase != "joining":
+            reason = "❌ Эта игра уже началась или завершена. Создайте новую через /start."
+        elif uid in current.players:
+            reason = "✅ Вы уже за этим столом."
+        elif len(current.players) >= 6:
+            reason = "❌ За столом уже 6 игроков — мест нет."
+        else:
+            current.players[uid] = []
+            current.player_names[uid] = player_name
+            game = current
+            joined = True
+
+    if not joined:
+        await update_balance(uid, bet, "bj_refund")
+        await call.answer(reason, show_alert=True)
+        return
+
+    # Сохраняем всех игроков, чтобы после перезапуска вернуть ставки каждому
+    await save_active_game(
+        room_id, "blackjack", game.creator_id, 0, game.bet,
+        game.chat_id, game.join_message_id, players=list(game.players.keys()),
+    )
 
     players_list = "\n".join(game.player_names.values())
     try:
@@ -222,50 +318,41 @@ async def cb_bj_join(call: CallbackQuery):
 async def cb_bj_start(call: CallbackQuery):
     room_id = call.data.replace("bj_start_", "")
     logger.info(f"bj_start: room_id={room_id}, uid={call.from_user.id}, in_memory={room_id in active_blackjack_games}")
-    async with active_games_lock:
-        game = active_blackjack_games.get(room_id)
-        if not game or game.is_finished:
-            try:
-                conn = await get_db()
-                cur = await conn.execute("SELECT * FROM active_game_sessions WHERE room_id = ?", (room_id,))
-                row = await cur.fetchone()
-                await conn.close()
-                if row and row["game_type"] == "blackjack":
-                    if row["state"] == "refunded":
-                        await call.answer("❌ Эта игра отменена (перезапуск бота). Создайте новую через /start.", show_alert=True)
-                        return
-                    chat_id = call.message.chat.id
-                    bet = row["bet"]
-                    p1 = row["player1"]
-                    game = BlackjackRoom(room_id, bet, p1, chat_id)
-                    game.players[p1] = []
-                    game.player_names[p1] = await get_username(p1)
-                    game.phase = "joining"
-                    active_blackjack_games[room_id] = game
-                    logger.info(f"bj_start: recovered game {room_id} from DB")
-                else:
-                    await call.answer("❌ Эта игра уже завершена или удалена. Создайте новую через /start.", show_alert=True)
-                    return
-            except Exception as e:
-                logger.exception(f"bj_start recovery error: {e}")
-                await call.answer("❌ Ошибка восстановления игры. Создайте новую через /start.", show_alert=True)
-                return
 
+    game, error = await _get_or_recover_bj(room_id, call.message.chat.id)
+    if not game:
+        await call.answer(_bj_error_text(error), show_alert=True)
+        return
+
+    async with active_games_lock:
         if call.from_user.id != game.creator_id:
             await call.answer("❌ Только создатель стола может начать игру.", show_alert=True)
             return
-
-        if game.phase != "joining":
+        if game.is_finished or game.phase != "joining":
             await call.answer("❌ Эта игра уже началась. Дождитесь следующей или создайте новую.", show_alert=True)
             return
-
         if len(game.players) < 1:
             await call.answer("❌ Нет игроков за столом. Пригласите игроков.", show_alert=True)
             return
-
         game.phase = "playing"
 
-    await start_blackjack_round(game)
+    try:
+        await start_blackjack_round(game)
+    except Exception as e:
+        logger.exception(f"bj_start: ошибка запуска игры {room_id}: {e}")
+        game.is_finished = True
+        game.phase = "finished"
+        async with active_games_lock:
+            active_blackjack_games.pop(room_id, None)
+        for pid in list(game.players):
+            try:
+                await update_balance(pid, game.bet, "bj_refund_error")
+            except Exception:
+                pass
+        await delete_active_game(room_id)
+        await call.answer("❌ Ошибка запуска игры. Ставки возвращены.", show_alert=True)
+        return
+
     await call.answer()
 
 
@@ -370,6 +457,11 @@ async def bj_player_timer(game: BlackjackRoom, player_id: int, total: int = 30):
         async with active_games_lock:
             if game.room_id in active_blackjack_games:
                 del active_blackjack_games[game.room_id]
+        for pid in list(game.players):
+            try:
+                await update_balance(pid, game.bet, "bj_refund_error")
+            except Exception:
+                pass
         await delete_active_game(game.room_id)
 
 
@@ -614,5 +706,5 @@ async def cb_casino_bj_bet(call: CallbackQuery, state: FSMContext):
     game.phase = "joining"
     await call.message.delete()
     await call.answer()
-    await save_active_game(room_id, "blackjack", call.from_user.id, 0, bet, call.message.chat.id, sent.message_id)
+    await save_active_game(room_id, "blackjack", call.from_user.id, 0, bet, call.message.chat.id, sent.message_id, players=[call.from_user.id])
     asyncio.ensure_future(blackjack_join_timeout(room_id, 60))

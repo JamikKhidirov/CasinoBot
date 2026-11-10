@@ -1,6 +1,4 @@
 import asyncio
-import logging
-import random
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -8,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from .base import (
-    get_bot, get_db, get_user, create_user, update_bot_balance, get_username,
+    get_db, get_user, create_user, update_bot_balance, get_username,
     GAMES_CONFIG, INITIAL_BOT_BALANCE, SoloBetState, logger,
     save_active_game, delete_active_game,
 )
@@ -90,21 +88,28 @@ async def solo_game_play(message: Message, game_type: str, bet: int, user_id: in
         return
 
     await update_bot_balance(uid, -bet, "solo_reserve")
+    bal_after = bal - bet
 
     config = GAMES_CONFIG[game_type]
     player_tag = await get_username(uid)
 
-    msg = await message.reply(
-        f"🤖 <b>Игра с ботом</b> {config['emoji']}\n"
-        f"💵 Ставка: {bet} монет\n"
-        f"💰 Ваш счёт: {bal} монет\n\n"
-        f"{player_tag}, нажмите кнопку👇 или отправьте {config['emoji']}",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"Бросить {config['emoji']}", callback_data=f"solo_roll_{uid}")]
-        ])
-    )
+    try:
+        msg = await message.reply(
+            f"🤖 <b>Игра с ботом</b> {config['emoji']}\n"
+            f"💵 Ставка: {bet} монет\n"
+            f"💰 Ваш счёт: {bal_after} монет\n\n"
+            f"{player_tag}, нажмите кнопку👇 или отправьте {config['emoji']}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=f"Бросить {config['emoji']}", callback_data=f"solo_roll_{uid}")]
+            ])
+        )
+    except Exception as e:
+        logger.error(f"Solo game start error for {uid}: {e}")
+        await update_bot_balance(uid, bet, "solo_refund")
+        await message.reply("❌ Не удалось начать игру. Ставка возвращена.")
+        return
 
-    _solo_games[uid] = {"game_type": game_type, "bet": bet, "msg": msg, "player_tag": player_tag, "bal": bal}
+    _solo_games[uid] = {"game_type": game_type, "bet": bet, "msg": msg, "player_tag": player_tag, "bal": bal_after}
     await save_active_game(f"solo_{uid}", "solo", uid, 0, bet, message.chat.id, msg.message_id)
 
 
@@ -118,6 +123,12 @@ async def _process_solo_roll(msg: Message, uid: int, game_state: dict):
     conn = None
     player_dice = None
     bot_dice_msg = None
+
+    # Защита от двойного нажатия / повторного броска
+    if game_state.get("rolling"):
+        return
+    game_state["rolling"] = True
+    settled = False
 
     try:
         def _result_label(val: int) -> str:
@@ -164,7 +175,7 @@ async def _process_solo_roll(msg: Message, uid: int, game_state: dict):
 
         await asyncio.sleep(1)
         new_user = await get_user(uid)
-        new_bal = new_user["bot_balance"] if new_user else bal
+        new_bal = new_user["bot_balance"] if new_user and new_user["bot_balance"] is not None else bal
 
         def is_player_win() -> str:
             if game_type in ("футбол", "баскетбол"):
@@ -181,6 +192,7 @@ async def _process_solo_roll(msg: Message, uid: int, game_state: dict):
         if result == "win":
             prize = bet * 2
             await update_bot_balance(uid, prize, "solo_win")
+            settled = True
             await msg.answer(
                 f"🏆 <b>Вы выиграли!</b> +{prize} монет\n"
                 f"💰 Ваш счёт: {new_bal + prize} монет",
@@ -194,7 +206,8 @@ async def _process_solo_roll(msg: Message, uid: int, game_state: dict):
             )
             await conn.commit()
         elif result == "lose":
-            await update_bot_balance(uid, -bet, "solo_lose")
+            # Ставка уже списана при старте игры — повторно не списываем.
+            settled = True
             await msg.answer(
                 f"❌ <b>Бот выиграл!</b> -{bet} монет\n"
                 f"💰 Ваш счёт: {new_bal} монет",
@@ -209,6 +222,7 @@ async def _process_solo_roll(msg: Message, uid: int, game_state: dict):
             await conn.commit()
         else:
             await update_bot_balance(uid, bet, "solo_tie")
+            settled = True
             await msg.answer(
                 f"🎭 <b>Ничья!</b> Ставка возвращена.\n"
                 f"💰 Ваш счёт: {new_bal + bet} монет",
@@ -224,6 +238,15 @@ async def _process_solo_roll(msg: Message, uid: int, game_state: dict):
 
     except Exception as e:
         logger.error(f"Solo roll error for {uid}: {e}")
+        if not settled:
+            try:
+                await update_bot_balance(uid, bet, "solo_refund_error")
+                await msg.answer(
+                    "❌ Произошла ошибка во время игры. Ставка возвращена.",
+                    reply_markup=_after_game_kb(game_type),
+                )
+            except Exception:
+                logger.exception(f"Не удалось вернуть ставку solo для {uid}")
     finally:
         # Cleanup: delete dice animation messages
         try:
@@ -274,6 +297,8 @@ async def cb_solo_roll(call: CallbackQuery):
 
 @router.message(F.text.in_(list({cfg["emoji"]: gt for gt, cfg in GAMES_CONFIG.items()}.keys())))
 async def solo_emoji_throw(message: Message):
+    if message.chat.type != "private":
+        return
     uid = message.from_user.id
     game = _solo_games.get(uid)
     if not game:

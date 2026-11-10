@@ -1,4 +1,3 @@
-import logging
 from datetime import datetime
 
 from aiogram import F, Router
@@ -9,8 +8,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from utils.helpers import resolve_user
 from .base import (
     get_bot, get_db, get_user, create_user, update_balance, update_bot_balance, get_username,
-    is_casino_admin, has_perm, is_owner, get_users_with_perm,
-    DepositState, PaymentProvideState, WithdrawState, AdminAction,
+    has_perm, is_owner, get_users_with_perm,
+    DepositState, PaymentProvideState, WithdrawState,
     ADMIN_ID, INITIAL_BOT_BALANCE, logger,
 )
 
@@ -728,6 +727,10 @@ async def cmd_activate_promo(message: Message):
     code = parts[1].strip().upper()
     user_id = message.from_user.id
 
+    user = await get_user(user_id)
+    if not user:
+        await create_user(message.from_user)
+
     conn = await get_db()
     try:
         cursor = await conn.execute("SELECT amount FROM promocodes WHERE code = ?", (code,))
@@ -737,25 +740,31 @@ async def cmd_activate_promo(message: Message):
             return
 
         amount = promo["amount"]
+        now = datetime.now().isoformat()
 
+        # Атомарная вставка: защита от одновременной активации одного кода
         cursor = await conn.execute(
-            "SELECT 1 FROM promo_activations WHERE code = ? AND user_id = ?",
-            (code, user_id),
+            "INSERT INTO promo_activations (code, user_id, activated_at) "
+            "SELECT ?, ?, ? WHERE NOT EXISTS ("
+            "SELECT 1 FROM promo_activations WHERE code = ? AND user_id = ?)",
+            (code, user_id, now, code, user_id),
         )
-        if await cursor.fetchone():
+        if cursor.rowcount == 0:
             await message.reply("❌ Вы уже активировали этот промокод.")
             return
-    finally:
-        await conn.close()
 
-    conn = await get_db()
-    try:
         await conn.execute(
-            "INSERT INTO promo_activations (code, user_id, activated_at) VALUES (?, ?, ?)",
-            (code, user_id, datetime.now().isoformat()),
+            "UPDATE users SET balance = balance + ? WHERE user_id = ?",
+            (amount, user_id),
         )
-        await update_balance(user_id, amount, "promo")
+        await conn.execute(
+            "INSERT INTO transactions (user_id, amount, type, timestamp) VALUES (?, ?, ?, ?)",
+            (user_id, amount, "promo", now),
+        )
         await conn.commit()
+    except Exception:
+        await conn.rollback()
+        raise
     finally:
         await conn.close()
 
@@ -815,7 +824,11 @@ async def cmd_delete_promo(message: Message):
     code = parts[1].strip().upper()
     conn = await get_db()
     try:
-        await conn.execute("DELETE FROM promocodes WHERE code = ?", (code,))
+        cursor = await conn.execute("DELETE FROM promocodes WHERE code = ?", (code,))
+        if cursor.rowcount == 0:
+            await message.reply(f"❌ Промокод <code>{code}</code> не найден.")
+            return
+        await conn.execute("DELETE FROM promo_activations WHERE code = ?", (code,))
         await conn.commit()
     finally:
         await conn.close()

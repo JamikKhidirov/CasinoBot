@@ -3,11 +3,11 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
 from .base import (
-    get_bot, get_db, get_user, create_user, update_balance, get_username,
+    get_bot, get_db, get_user, create_user, update_balance, update_bot_balance, get_username,
     GAMES_CONFIG, active_games, active_blackjack_games, active_games_lock,
-    ADMIN_ID, is_casino_admin, has_perm, init_db,
+    is_casino_admin, has_perm, delete_active_game, logger,
 )
-from .keyboards import casino_menu_kb, game_selection_kb, pvp_game_selection_kb, solo_game_selection_kb, solo_bet_selection_kb, blackjack_bet_kb, bet_selection_kb, casino_admin_kb
+from .keyboards import casino_menu_kb, game_selection_kb, pvp_game_selection_kb, solo_game_selection_kb, blackjack_bet_kb
 
 router = Router()
 
@@ -198,58 +198,70 @@ async def cb_casino_active(call: CallbackQuery):
     await call.answer()
 
 
-@router.callback_query(F.data == "casino_unlock")
-async def cb_casino_unlock(call: CallbackQuery):
-    user_id = call.from_user.id
+async def _cancel_user_games(user_id: int) -> int:
+    """Отменяет все игры пользователя и возвращает ставки. Возвращает сумму возврата."""
     refunded = 0
+    pvp_rooms: list[str] = []
+    bj_rooms: list[tuple[str, object]] = []
 
     async with active_games_lock:
-        to_remove = []
-        for rid, g in active_games.items():
-            if user_id in (g.player1, g.player2):
+        for rid, g in list(active_games.items()):
+            if user_id not in (g.player1, g.player2):
+                continue
+            g.is_finished = True
+            for pid in (g.player1, g.player2):
+                if not pid:
+                    continue
                 try:
-                    await update_balance(g.player1, g.bet, "refund")
+                    await update_balance(pid, g.bet, "refund_unlock")
                     refunded += g.bet
-                    if g.player2:
-                        await update_balance(g.player2, g.bet, "refund")
-                        refunded += g.bet
                 except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).error(f"Refund error: {e}")
-                to_remove.append(rid)
+                    logger.error(f"Refund error (pvp {rid}, user {pid}): {e}")
+            active_games.pop(rid, None)
+            pvp_rooms.append(rid)
 
-        for rid in to_remove:
-            del active_games[rid]
-
-    # Blackjack cleanup
-    async with active_games_lock:
-        bj_to_remove = []
         for rid, g in list(active_blackjack_games.items()):
-            if user_id in g.players:
+            if user_id not in g.players:
+                continue
+            g.is_finished = True
+            g.phase = "finished"
+            for pid in list(g.players):
                 try:
-                    await update_balance(user_id, g.bet, "refund")
+                    await update_balance(pid, g.bet, "refund_unlock")
                     refunded += g.bet
-                except Exception:
-                    pass
-                bj_to_remove.append((rid, g))
-        for rid, g in bj_to_remove:
-            try:
-                await g.cancel_timer()
-            except Exception:
-                pass
-            del active_blackjack_games[rid]
+                except Exception as e:
+                    logger.error(f"Refund error (blackjack {rid}, user {pid}): {e}")
+            active_blackjack_games.pop(rid, None)
+            bj_rooms.append((rid, g))
 
-    # Solo cleanup
+    for rid in pvp_rooms:
+        await delete_active_game(rid)
+
+    from .blackjack import cancel_bj_timer
+    for rid, g in bj_rooms:
+        try:
+            await cancel_bj_timer(g)
+        except Exception:
+            pass
+        await delete_active_game(rid)
+
+    # Solo: ставка лежит на bot_balance
     from .games_solo import _solo_games
     solo = _solo_games.pop(user_id, None)
     if solo:
         try:
-            await update_balance(user_id, solo["bet"], "refund")
+            await update_bot_balance(user_id, solo["bet"], "refund_unlock")
             refunded += solo["bet"]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Refund error (solo {user_id}): {e}")
         await delete_active_game(f"solo_{user_id}")
 
+    return refunded
+
+
+@router.callback_query(F.data == "casino_unlock")
+async def cb_casino_unlock(call: CallbackQuery):
+    refunded = await _cancel_user_games(call.from_user.id)
     await call.message.answer(
         f"✅ <b>Все ваши игры отменены!</b>\n🔙 Возвращено: <b>{refunded}</b> 🪙\n"
         "Теперь вы можете создавать новые игры!",
@@ -386,55 +398,7 @@ async def cmd_active_games(message: Message):
 @router.message(Command("разблокировать"))
 @router.message(Command("unlock"))
 async def cmd_force_unlock(message: Message):
-    user_id = message.from_user.id
-    refunded = 0
-
-    async with active_games_lock:
-        to_remove = []
-        for rid, g in active_games.items():
-            if user_id in (g.player1, g.player2):
-                try:
-                    await update_balance(g.player1, g.bet, "refund")
-                    refunded += g.bet
-                    if g.player2:
-                        await update_balance(g.player2, g.bet, "refund")
-                        refunded += g.bet
-                except:
-                    pass
-                to_remove.append(rid)
-
-        for rid in to_remove:
-            del active_games[rid]
-
-    # Blackjack cleanup
-    async with active_games_lock:
-        bj_to_remove = []
-        for rid, g in list(active_blackjack_games.items()):
-            if user_id in g.players:
-                try:
-                    await update_balance(user_id, g.bet, "refund")
-                    refunded += g.bet
-                except:
-                    pass
-                bj_to_remove.append((rid, g))
-        for rid, g in bj_to_remove:
-            try:
-                await g.cancel_timer()
-            except:
-                pass
-            del active_blackjack_games[rid]
-
-    # Solo cleanup
-    from .games_solo import _solo_games
-    solo = _solo_games.pop(user_id, None)
-    if solo:
-        try:
-            await update_balance(user_id, solo["bet"], "refund")
-            refunded += solo["bet"]
-        except:
-            pass
-        await delete_active_game(f"solo_{user_id}")
-
+    refunded = await _cancel_user_games(message.from_user.id)
     await message.reply(
         f"✅ Все ваши игры отменены! Возвращено: {refunded} монет\n"
         "Теперь вы можете создавать новые игры!"

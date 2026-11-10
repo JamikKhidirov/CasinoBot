@@ -1,6 +1,5 @@
 import datetime
 import re
-from typing import Optional
 import db
 from config import OWNER_ID
 

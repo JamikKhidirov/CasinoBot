@@ -1,8 +1,7 @@
 import os
 
-# Значения ниже — дефолт. Их можно переопределить переменными окружения
-# (см. .env.example), что обязательно при запуске в Docker.
-_DEFAULT_BOT_TOKEN = "8374862323:AAFqyGFcJLhI8426GpRdhKYU7BGa05DvtUo"
+# Секреты (BOT_TOKEN) задаются только через переменные окружения / .env.
+# Значения ниже — безопасные дефолты для остальных настроек.
 _DEFAULT_OWNER_ID = 1819756249
 
 
@@ -36,7 +35,7 @@ def _env_ids(name: str) -> list[int]:
     return ids
 
 
-BOT_TOKEN = _env("BOT_TOKEN", _DEFAULT_BOT_TOKEN)
+BOT_TOKEN = _env("BOT_TOKEN")
 OWNER_ID = _env_int("OWNER_ID", _DEFAULT_OWNER_ID)
 OWNER_TG = _env("OWNER_TG", "jamik_khidirov")
 

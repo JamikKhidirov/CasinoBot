@@ -317,6 +317,7 @@ async def cb_admin_panel(call: CallbackQuery):
 async def cb_admin_commands(call: CallbackQuery):
     uid = call.from_user.id
     if not is_admin(uid):
+        await safe_answer(call, "❌ Доступ запрещён.", show_alert=True)
         return
     is_dev_user = uid == OWNER_ID
     can_chat = can_read_chats(uid)
@@ -331,7 +332,6 @@ async def cb_admin_commands(call: CallbackQuery):
     # Казино (для всех)
     parts.append("\n<b>🎰 Казино</b>")
     parts.append("/profile — профиль игрока")
-    parts.append("/bonus — ежедневный бонус")
     parts.append("/top — топ игроков")
     parts.append("/games — список игр")
     parts.append("/dice [ставка] — кости")
@@ -339,8 +339,12 @@ async def cb_admin_commands(call: CallbackQuery):
     parts.append("/darts [ставка] — дротики")
     parts.append("/basket [ставка] — баскетбол")
     parts.append("/football [ставка] — футбол")
+    parts.append("/blackjack [ставка] — блэкджек (в группе)")
+    parts.append("/solo — игра с ботом (в ЛС)")
+    parts.append("/solotop — топ с ботом")
     parts.append("/active — активные игры")
     parts.append("/unlock — отменить свои игры")
+    parts.append("/promo [код] — активировать промокод")
 
     # Админ (для всех админов)
     parts.append("\n<b>🛡 Админ-команды</b>")
@@ -355,6 +359,10 @@ async def cb_admin_commands(call: CallbackQuery):
     parts.append("/warns [id] — варны")
     parts.append("/admin — админ-панель казино")
     parts.append("/players — список игроков")
+    parts.append("/addbotcoins [id] [сумма] — пополнить счёт бота")
+    parts.append("/createpromo [код] [сумма] — создать промокод")
+    parts.append("/deletepromo [код] — удалить промокод")
+    parts.append("/promo_list — список промокодов")
 
     if can_chat:
         parts.append("\n<b>💬 Чат-лог (доступ по разрешению)</b>")
@@ -399,6 +407,7 @@ async def cb_admin_commands(call: CallbackQuery):
 async def cb_admin_stats(call: CallbackQuery):
     uid = call.from_user.id
     if not is_admin(uid):
+        await safe_answer(call, "❌ Доступ запрещён.", show_alert=True)
         return
     import db
     import datetime
@@ -427,6 +436,7 @@ async def cb_admin_stats(call: CallbackQuery):
 async def cb_admin_mod(call: CallbackQuery):
     uid = call.from_user.id
     if not is_admin(uid):
+        await safe_answer(call, "❌ Доступ запрещён.", show_alert=True)
         return
     await call.message.edit_text(
         "<b>🛡 Модерация</b>\n"

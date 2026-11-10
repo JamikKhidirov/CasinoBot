@@ -1,6 +1,5 @@
 import datetime
 
-import db
 from config import OWNER_ID
 from utils import helpers
 

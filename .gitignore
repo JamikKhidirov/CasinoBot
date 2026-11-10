@@ -2,10 +2,11 @@
 __pycache__/
 *.pyc
 .idea/
-bot_errors.log
-*.db
-.env
+.pytest_cache/
 
-!requirements.txt
-*.txt
-telethon_session.session
+# Runtime data and secrets
+.env
+*.db
+*.session
+bot_errors.log
+_check.txt

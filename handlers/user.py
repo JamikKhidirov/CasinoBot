@@ -3,7 +3,6 @@ from aiogram.filters import Command
 from aiogram.types import Message
 from utils.keyboards import main_kb
 from utils.helpers import is_banned, save_message, is_admin, update_user_activity
-from config import OWNER_ID
 import db
 import datetime
 

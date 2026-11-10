@@ -73,6 +73,13 @@ async def main():
     )
     logger = logging.getLogger(__name__)
 
+    if not config.BOT_TOKEN:
+        logger.error(
+            "BOT_TOKEN не задан. Укажите его в .env или переменных окружения "
+            "(см. .env.example)."
+        )
+        return
+
     try:
         init_db()
         await casino_init_db()

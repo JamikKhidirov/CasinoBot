@@ -1,7 +1,5 @@
 import asyncio
-import logging
 import uuid
-from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -169,6 +167,7 @@ async def cb_cancel_game(call: CallbackQuery):
             await update_balance(game.player2, game.bet, "refund")
         game.is_finished = True
         del active_games[room_id]
+    await delete_active_game(room_id)
     await call.answer("✅ Игра отменена!")
     try:
         await get_bot().edit_message_text(
@@ -238,7 +237,6 @@ async def _turn_timeout(game: GameRoom, player_id: int, delay: int):
             g.player1_turn = not g.player1_turn
             next_player = g.player2 if player_id == g.player1 else g.player1
             await send_turn_notification(g, next_player)
-            asyncio.ensure_future(_turn_timeout(g, next_player, 60))
     except Exception as e:
         logger.error(f"Ошибка в _turn_timeout: {e}")
 
@@ -381,8 +379,8 @@ async def process_dice_roll(game: GameRoom, player_id: int, dice_value: int):
 
             adjusted = dice_value - 1 if game.game_type in ("дротики", "боулинг") else dice_value
             score_text = {
-                "⚽": f"{'⚽ ГОЛ!' if dice_value > 2 else '❌ Промах!'}",
-                "🏀": f"{'🏀 Попадание!' if dice_value > 2 else '❌ Промах!'}",
+                "⚽": f"{'⚽ ГОЛ!' if dice_value > 3 else '❌ Промах!'}",
+                "🏀": f"{'🏀 Попадание!' if dice_value > 3 else '❌ Промах!'}",
                 "🎯": f"{adjusted}",
                 "🎳": f"{adjusted}",
             }.get(config["emoji"], f"{dice_value}")
@@ -429,6 +427,7 @@ async def send_turn_notification(game: GameRoom, next_player: int):
             game.message_id = sent.message_id
 
         await ask_for_dice_roll(game, next_player)
+        asyncio.ensure_future(_turn_timeout(game, next_player, 60))
 
     except Exception as e:
         logger.error(f"Ошибка при отправке уведомления о ходе: {e}")
@@ -460,8 +459,8 @@ async def determine_winner(game: GameRoom):
         else:
             is_goal_game = game.game_type in ("футбол", "баскетбол")
             if is_goal_game:
-                p1_hit = p1_score > 2
-                p2_hit = p2_score > 2
+                p1_hit = p1_score > 3
+                p2_hit = p2_score > 3
                 if p1_hit and p2_hit:
                     await update_balance(game.player1, game.bet, "refund")
                     await update_balance(game.player2, game.bet, "refund")
@@ -521,8 +520,8 @@ async def determine_winner(game: GameRoom):
         p1_label = str(p1_score)
         p2_label = str(p2_score)
         if game.game_type in ("футбол", "баскетбол"):
-            p1_label = "✅ Гол" if p1_score > 2 else "❌ Промах"
-            p2_label = "✅ Гол" if p2_score > 2 else "❌ Промах"
+            p1_label = "✅ Гол" if p1_score > 3 else "❌ Промах"
+            p2_label = "✅ Гол" if p2_score > 3 else "❌ Промах"
         elif game.game_type in ("дротики", "боулинг"):
             p1_label = f"🎯 {p1_score}"
             p2_label = f"🎯 {p2_score}"
@@ -572,6 +571,7 @@ async def determine_winner(game: GameRoom):
         async with active_games_lock:
             if game.room_id in active_games:
                 del active_games[game.room_id]
+        await delete_active_game(game.room_id)
 
         logger.info(f"Игра завершена: room_id={game.room_id}, winner={winner}")
 
@@ -586,6 +586,7 @@ async def determine_winner(game: GameRoom):
             if game.room_id in active_games:
                 game.is_finished = True
                 del active_games[game.room_id]
+        await delete_active_game(game.room_id)
 
 
 async def auto_roll_dice(game: GameRoom):
@@ -613,6 +614,8 @@ async def handle_game_emoji(message: Message):
     if not game_type:
         return
 
+    solo = None
+    error = None
     async with active_games_lock:
         game = None
         for g in active_games.values():
@@ -623,28 +626,30 @@ async def handle_game_emoji(message: Message):
                 break
 
         if not game:
-            # If user has a solo game, process it here directly
-            try:
-                from .games_solo import _solo_games, _process_solo_roll
+            # Игра с ботом обрабатывается вне lock (там долгие анимации)
+            if message.chat.type == "private":
+                from .games_solo import _solo_games
                 solo = _solo_games.get(uid)
-                if solo:
-                    await _process_solo_roll(message, uid, solo)
-                    return
-            except ImportError:
-                pass
+        else:
+            current = game.player1 if game.player1_turn else game.player2
+            if uid != current:
+                error = "❌ Сейчас не ваш ход!"
+            elif uid in game.results:
+                error = "❌ Вы уже сделали бросок!"
+            else:
+                game.results[uid] = -1
+
+    if error:
+        await message.answer(error)
+        return
+
+    if not game:
+        if solo and solo.get("game_type") == game_type:
+            from .games_solo import _process_solo_roll
+            await _process_solo_roll(message, uid, solo)
+        else:
             await message.answer("❌ У вас нет активной игры этого типа.")
-            return
-
-        current = game.player1 if game.player1_turn else game.player2
-        if uid != current:
-            await message.answer("❌ Сейчас не ваш ход!")
-            return
-
-        if uid in game.results:
-            await message.answer("❌ Вы уже сделали бросок!")
-            return
-
-        game.results[uid] = -1
+        return
 
     config = GAMES_CONFIG[game.game_type]
     player_name = await get_username(uid)
@@ -850,7 +855,7 @@ async def process_custom_bet(message: Message, state: FSMContext):
         )
         game.join_message_id = sent.message_id
         game.phase = "joining"
-        await save_active_game(room_id, "blackjack", message.from_user.id, 0, bet, message.chat.id, sent.message_id)
+        await save_active_game(room_id, "blackjack", message.from_user.id, 0, bet, message.chat.id, sent.message_id, players=[message.from_user.id])
         asyncio.ensure_future(blackjack_join_timeout(room_id, 60))
         return
 

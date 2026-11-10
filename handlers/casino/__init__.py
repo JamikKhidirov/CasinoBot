@@ -1,6 +1,6 @@
 from aiogram import Router
 
-from .base import setup, init_db, refund_orphaned_games
+from .base import setup, init_db, refund_orphaned_games, get_db
 from . import menu
 from . import profile
 from . import games_pvp

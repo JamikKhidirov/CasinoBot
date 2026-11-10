@@ -1,9 +1,8 @@
 import asyncio
+import json
 import logging
 import os
-import random
-import uuid
-from datetime import date, datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -12,7 +11,6 @@ from aiogram import Bot
 from aiogram.fsm.state import State, StatesGroup
 
 from config import OWNER_ID as ADMIN_ID
-from utils.helpers import is_dev, is_admin, ban_user, unban_user, mute_user, unmute_user, add_warn, is_banned, is_muted, get_warns
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +152,7 @@ async def init_db():
                 code TEXT NOT NULL,
                 user_id INTEGER NOT NULL,
                 activated_at TEXT,
+                UNIQUE(code, user_id),
                 FOREIGN KEY (code) REFERENCES promocodes(code)
             );
             CREATE TABLE IF NOT EXISTS solo_scores (
@@ -178,6 +177,7 @@ async def init_db():
                 bet INTEGER,
                 chat_id INTEGER,
                 message_id INTEGER,
+                players TEXT,
                 state TEXT DEFAULT 'active',
                 created_at TEXT
             );
@@ -205,8 +205,12 @@ async def init_db():
             except Exception:
                 pass
 
-    # migration: add chat_id/message_id to active_game_sessions
-    for s_col in [("chat_id", "INTEGER DEFAULT 0"), ("message_id", "INTEGER DEFAULT 0")]:
+    # migration: add chat_id/message_id/players to active_game_sessions
+    for s_col in [
+        ("chat_id", "INTEGER DEFAULT 0"),
+        ("message_id", "INTEGER DEFAULT 0"),
+        ("players", "TEXT"),
+    ]:
         try:
             c3 = await get_db()
             await c3.execute(f"ALTER TABLE active_game_sessions ADD COLUMN {s_col[0]} {s_col[1]}")
@@ -411,13 +415,14 @@ async def is_casino_admin(user_id: int) -> bool:
 # ─── PERSISTENCE: active game sessions ─────────────────────────────
 
 
-async def save_active_game(room_id: str, game_type: str, player1: int, player2: int, bet: int, chat_id: int = 0, message_id: int = 0):
+async def save_active_game(room_id: str, game_type: str, player1: int, player2: int, bet: int, chat_id: int = 0, message_id: int = 0, players: Optional[list[int]] = None):
     conn = await get_db()
     try:
+        players_json = json.dumps(players) if players is not None else None
         await conn.execute(
-            "INSERT OR REPLACE INTO active_game_sessions (room_id, game_type, player1, player2, bet, chat_id, message_id, state, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)",
-            (room_id, game_type, player1, player2, bet, chat_id, message_id, datetime.now().isoformat()),
+            "INSERT OR REPLACE INTO active_game_sessions (room_id, game_type, player1, player2, bet, chat_id, message_id, players, state, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)",
+            (room_id, game_type, player1, player2, bet, chat_id, message_id, players_json, datetime.now().isoformat()),
         )
         await conn.commit()
     finally:
@@ -449,10 +454,24 @@ async def refund_orphaned_games():
                 msg_id = row["message_id"] or 0
             except (IndexError, KeyError):
                 pass
+            notify_ids = [p1, p2]
             if game_type == "blackjack":
-                await conn.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (bet, p1))
-                await conn.execute("INSERT INTO transactions (user_id, amount, type, timestamp) VALUES (?, ?, ?, ?)",
-                                   (p1, bet, "refund_restart", datetime.now().isoformat()))
+                # В блэкджеке за столом может быть до 6 игроков — возвращаем всем.
+                player_ids = [p1]
+                try:
+                    raw_players = row["players"]
+                    if raw_players:
+                        parsed = json.loads(raw_players)
+                        if parsed:
+                            player_ids = [int(x) for x in parsed]
+                except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
+                    pass
+                player_ids = list(dict.fromkeys(pid for pid in player_ids if pid))
+                notify_ids = player_ids
+                for pid in player_ids:
+                    await conn.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (bet, pid))
+                    await conn.execute("INSERT INTO transactions (user_id, amount, type, timestamp) VALUES (?, ?, ?, ?)",
+                                       (pid, bet, "refund_restart", datetime.now().isoformat()))
             elif game_type == "solo":
                 await conn.execute("UPDATE users SET bot_balance = bot_balance + ? WHERE user_id = ?", (bet, p1))
                 await conn.execute("INSERT INTO transactions (user_id, amount, type, timestamp) VALUES (?, ?, ?, ?)",
@@ -481,9 +500,11 @@ async def refund_orphaned_games():
             try:
                 bot = get_bot()
                 label = {"blackjack": "🃏", "solo": "🤖", "rps": "✂️"}.get(game_type, "🎲")
-                await bot.send_message(p1, f"{label} Игра прервана перезапуском бота.\n💰 Ставка <b>{bet}</b> 🪙 возвращена.")
-                if p2:
-                    await bot.send_message(p2, f"{label} Игра прервана перезапуском бота.\n💰 Ставка <b>{bet}</b> 🪙 возвращена.")
+                for pid in dict.fromkeys(pid for pid in notify_ids if pid):
+                    try:
+                        await bot.send_message(pid, f"{label} Игра прервана перезапуском бота.\n💰 Ставка <b>{bet}</b> 🪙 возвращена.")
+                    except Exception:
+                        pass
             except Exception:
                 pass
     finally:

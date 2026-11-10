@@ -3,7 +3,6 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 from aiogram.types import BotCommandScopeChat, BotCommandScopeDefault
 from config import OWNER_ID
-from utils.helpers import is_admin, can_read_chats
 import db
 import datetime
 import asyncio
